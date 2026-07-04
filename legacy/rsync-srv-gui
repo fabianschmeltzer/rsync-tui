@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Legacy prototype: unsupported. Use the rsync-tui release from the repository root.
 set -euo pipefail
 
 browse_folders() {

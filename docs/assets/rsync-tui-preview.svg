@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-labelledby="title desc">
+  <title id="title">rsync-tui dashboard preview</title>
+  <desc id="desc">Dark terminal window showing the rsync-tui main menu with New transfer selected.</desc>
+  <rect width="960" height="560" rx="18" fill="#0f172a"/>
+  <rect x="1" y="1" width="958" height="558" rx="17" fill="none" stroke="#334155" stroke-width="2"/>
+  <circle cx="30" cy="28" r="7" fill="#ef4444"/>
+  <circle cx="54" cy="28" r="7" fill="#f59e0b"/>
+  <circle cx="78" cy="28" r="7" fill="#22c55e"/>
+  <text x="480" y="34" fill="#94a3b8" font-family="monospace" font-size="15" text-anchor="middle">fabian@homelab — rsync-tui</text>
+  <line x1="0" y1="52" x2="960" y2="52" stroke="#334155"/>
+
+  <text x="55" y="94" fill="#7c9dff" font-family="monospace" font-size="28" font-weight="700">rsync-tui</text>
+  <text x="220" y="94" fill="#94a3b8" font-family="monospace" font-size="16">v0.1.0</text>
+  <text x="55" y="124" fill="#94a3b8" font-family="monospace" font-size="16">Safe local and SSH transfers powered by rsync</text>
+
+  <rect x="50" y="152" width="860" height="336" rx="12" fill="#111c32" stroke="#475569" stroke-width="2"/>
+  <rect x="82" y="184" width="796" height="40" rx="6" fill="#3151a4"/>
+  <text x="104" y="210" fill="#f8fafc" font-family="monospace" font-size="18" font-weight="700">› New transfer</text>
+  <text x="104" y="256" fill="#cbd5e1" font-family="monospace" font-size="18">  Profiles</text>
+  <text x="104" y="296" fill="#cbd5e1" font-family="monospace" font-size="18">  Snapshots &amp; restore</text>
+  <text x="104" y="336" fill="#cbd5e1" font-family="monospace" font-size="18">  Schedules</text>
+  <text x="104" y="376" fill="#cbd5e1" font-family="monospace" font-size="18">  History</text>
+  <text x="104" y="416" fill="#cbd5e1" font-family="monospace" font-size="18">  Settings</text>
+  <text x="104" y="456" fill="#cbd5e1" font-family="monospace" font-size="18">  Quit</text>
+
+  <text x="55" y="524" fill="#64748b" font-family="monospace" font-size="15">↑/↓ move • Enter select • l language • q quit</text>
+</svg>

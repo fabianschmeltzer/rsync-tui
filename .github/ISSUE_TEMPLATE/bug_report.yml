@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible rsync-tui problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Never include passwords, private keys, tokens, or unredacted webhook URLs.
+  - type: input
+    id: version
+    attributes:
+      label: rsync-tui version
+      description: Output of `rsync-tui version`
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Linux distribution and architecture
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Output of `rsync-tui doctor --json` and relevant redacted logs

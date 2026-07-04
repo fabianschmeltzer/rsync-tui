@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Derive signing public key
+        id: signing
+        env:
+          RSYNC_TUI_SIGNING_KEY: ${{ secrets.RSYNC_TUI_SIGNING_KEY }}
+        run: echo "public_key=$(go run ./cmd/release-helper public-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Build release archives
+        env:
+          PUBLIC_KEY: ${{ steps.signing.outputs.public_key }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.buildDate=${BUILD_DATE} -X github.com/fabianschmeltzer/rsync-tui/internal/update.EmbeddedPublicKey=${PUBLIC_KEY}"
+          mkdir -p dist
+          for TARGET in amd64 arm64 armv7; do
+            rm -rf "dist/stage-${TARGET}"
+            mkdir -p "dist/stage-${TARGET}"
+            if [ "$TARGET" = "armv7" ]; then
+              CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "$LDFLAGS" -o "dist/stage-${TARGET}/rsync-tui" ./cmd/rsync-tui
+            else
+              CGO_ENABLED=0 GOOS=linux GOARCH="$TARGET" go build -trimpath -ldflags "$LDFLAGS" -o "dist/stage-${TARGET}/rsync-tui" ./cmd/rsync-tui
+            fi
+            tar -C "dist/stage-${TARGET}" -czf "dist/rsync-tui_linux_${TARGET}.tar.gz" rsync-tui
+            rm -rf "dist/stage-${TARGET}"
+          done
+
+      - name: Create and sign manifest
+        env:
+          RSYNC_TUI_SIGNING_KEY: ${{ secrets.RSYNC_TUI_SIGNING_KEY }}
+        run: |
+          go run ./cmd/release-helper manifest "$GITHUB_REF_NAME" dist > dist/manifest.json
+          go run ./cmd/release-helper sign dist/manifest.json > dist/manifest.json.sig
+          cd dist
+          sha256sum *.tar.gz manifest.json manifest.json.sig > SHA256SUMS
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/manifest.json
+            dist/manifest.json.sig
+            dist/SHA256SUMS
+            dist/sbom.spdx.json
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/manifest.json
+            dist/manifest.json.sig
+            dist/SHA256SUMS
+            dist/sbom.spdx.json
