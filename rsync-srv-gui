@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+browse_folders() {
+    local current="${1:-/srv}"
+    local title="${2:-Ordner wählen}"
+
+    while true; do
+        mapfile -t dir_list < <(
+            find "$current" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+            | sort \
+            | head -20
+        )
+
+        local menu_entries=()
+
+        if [[ "$current" != "/" && "$current" != "/srv" ]]; then
+            menu_entries+=(".." "Zurück")
+        fi
+
+        menu_entries+=("CURRENT" "Diesen Ordner wählen")
+
+        for fullpath in "${dir_list[@]}"; do
+            name="$(basename "$fullpath")"
+            menu_entries+=("$name" "Ordner $name/")
+        done
+
+        local choice
+
+        choice=$(
+            whiptail \
+                --title "$title" \
+                --menu "Pfad: $current | ${#dir_list[@]} Ordner" \
+                25 80 18 \
+                "${menu_entries[@]}" \
+                3>&1 1>&2 2>&3
+        ) || return 1
+
+        case "$choice" in
+            "..")
+                current="${current%/*}"
+
+                if [[ -z "$current" ]]; then
+                    current="/srv"
+                fi
+                ;;
+            "CURRENT")
+                echo "$current"
+                return 0
+                ;;
+            *)
+                for fullpath in "${dir_list[@]}"; do
+                    if [[ "$(basename "$fullpath")" == "$choice" ]]; then
+                        current="$fullpath"
+                        break
+                    fi
+                done
+                ;;
+        esac
+    done
+}
+
+clear
+
+echo "=============================================="
+echo " rsync Navigator für /srv Drives (OMV/USB)"
+echo "=============================================="
+
+command -v whiptail >/dev/null 2>&1 || {
+    echo "Fehlt: whiptail"
+    echo "Installieren mit:"
+    echo "sudo apt install whiptail"
+    exit 1
+}
+
+OP=$(
+    whiptail \
+        --title "rsync Modus" \
+        --menu "OMV/USB-kompatibel | Start: /srv" \
+        18 70 6 \
+        "1" "Kopieren (Neue und aktualisierte Dateien)" \
+        "2" "Verschieben (Dateien verschieben)" \
+        "3" "Sync (Mirror Quelle -> Ziel)" \
+        "4" "Test (Keine Änderungen)" \
+        3>&1 1>&2 2>&3
+) || exit 1
+
+case "$OP" in
+    1)
+        op="KOPIEREN / AKTUALISIEREN"
+        flags=(-a -u --info=progress2 --human-readable)
+        ;;
+    2)
+        op="VERSCHIEBEN"
+        flags=(-a --remove-source-files --info=progress2 --human-readable)
+        ;;
+    3)
+        op="SYNCHRONISIEREN"
+        flags=(-a --delete --info=progress2 --human-readable)
+        ;;
+    4)
+        op="TROCKENLAUF"
+        flags=(-a --dry-run --info=progress2 --human-readable)
+        ;;
+esac
+
+echo "Quelle wählen..."
+SRC=$(browse_folders "/srv" "QUELLE wählen") || {
+    echo "Abgebrochen"
+    exit 1
+}
+
+echo "Ziel wählen..."
+DST=$(browse_folders "/srv" "ZIEL wählen") || {
+    echo "Abgebrochen"
+    exit 1
+}
+
+SRC_CLEAN=$(echo "$SRC" | sed 's|//*|/|g; s|/$||')
+DST_CLEAN=$(echo "$DST" | sed 's|//*|/|g; s|/$||')
+
+if [[ "$SRC_CLEAN" == "$DST_CLEAN" ]]; then
+    whiptail \
+        --title "Fehler" \
+        --msgbox "Quelle und Ziel dürfen nicht identisch sein." \
+        10 60
+
+    exit 1
+fi
+
+if [[ "$DST_CLEAN" == "$SRC_CLEAN/"* ]]; then
+    whiptail \
+        --title "Fehler" \
+        --msgbox "Das Ziel darf kein Unterordner der Quelle sein." \
+        10 60
+
+    exit 1
+fi
+
+SRC_NAME=$(basename "$SRC_CLEAN")
+DST_NAME=$(basename "$DST_CLEAN")
+
+clear
+
+echo "==================================================================="
+echo "                       ÜBERSICHT"
+echo "==================================================================="
+echo "Operation: $op"
+echo
+echo "Von:  $SRC_NAME/"
+echo "Nach: $DST_NAME/"
+echo
+echo "Vollständige Pfade:"
+echo "-------------------------------------------------------------------"
+echo "$SRC_CLEAN/"
+echo "$DST_CLEAN/"
+echo "-------------------------------------------------------------------"
+
+if [[ "$op" == "VERSCHIEBEN" ]]; then
+    echo "Dateien werden nach erfolgreicher Übertragung entfernt."
+fi
+
+if [[ "$op" == "SYNCHRONISIEREN" ]]; then
+    echo "Ziel wird exakt an die Quelle angepasst (--delete)."
+fi
+
+echo "==================================================================="
+
+SUMMARY_TEXT="${op}
+
+Von:  $SRC_NAME/
+Nach: $DST_NAME/
+
+$SRC_CLEAN/
+   ->
+$DST_CLEAN/"
+
+if ! whiptail \
+    --title "FINAL BESTÄTIGUNG" \
+    --yesno "$SUMMARY_TEXT" \
+    16 75
+then
+    clear
+    echo "Abgebrochen."
+    exit 0
+fi
+
+clear
+
+echo "==================================================================="
+echo "RSYNC $op STARTET"
+echo "==================================================================="
+echo "Von:  $SRC_CLEAN/"
+echo "Nach: $DST_CLEAN/"
+echo "==================================================================="
+
+rsync \
+    "${flags[@]}" \
+    --no-inc-recursive \
+    --stats \
+    "$SRC_CLEAN/" \
+    "$DST_CLEAN/"
+
+if [[ "$OP" == "2" ]]; then
+    echo
+    echo "Leere Quellordner werden entfernt..."
+
+    find "$SRC_CLEAN" \
+        -depth \
+        -type d \
+        -empty \
+        -delete
+fi
+
+echo
+echo "==================================================================="
+echo "ERFOLGREICH ABGESCHLOSSEN"
+echo "==================================================================="
+
+read -rp "Enter zum Beenden..."
