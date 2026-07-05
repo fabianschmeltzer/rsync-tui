@@ -27,3 +27,28 @@ func TestLoadSettingsNormalizesNegativeCheckHours(t *testing.T) {
 		t.Fatalf("CheckHours = %d, want 24", loaded.CheckHours)
 	}
 }
+
+func TestAppearanceSettingsDefaultsAndLegacyValues(t *testing.T) {
+	defaults := DefaultSettings()
+	if defaults.Theme != "material-dark" ||
+		defaults.Accent != "indigo" ||
+		defaults.Density != "comfortable" ||
+		defaults.Icons != "unicode" ||
+		defaults.Motion != "subtle" {
+		t.Fatalf("unexpected appearance defaults: %+v", defaults)
+	}
+
+	legacy := normalizeSettings(Settings{SchemaVersion: 1, Theme: "auto"})
+	if legacy.Theme != "material-dark" ||
+		legacy.Accent != "indigo" ||
+		legacy.Density != "comfortable" ||
+		legacy.Icons != "unicode" ||
+		legacy.Motion != "subtle" {
+		t.Fatalf("legacy settings were not normalized: %+v", legacy)
+	}
+
+	noColor := normalizeSettings(Settings{SchemaVersion: 1, Theme: "no-color"})
+	if noColor.Theme != "no-color" {
+		t.Fatalf("no-color theme was not preserved: %+v", noColor)
+	}
+}

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,9 +68,17 @@ type browserLoadedMsg struct {
 	err     error
 }
 
+type dashboardLoadedMsg struct {
+	profiles  int
+	snapshots int
+	schedules int
+	history   []rsyncengine.Result
+}
+
 type Model struct {
 	store            *config.Store
 	settings         config.Settings
+	design           designSystem
 	translator       i18n.Translator
 	version          string
 	width            int
@@ -97,6 +104,7 @@ type Model struct {
 	runEvents        chan tea.Msg
 	cancel           context.CancelFunc
 	logLines         []string
+	logOffset        int
 	lastOutcome      job.Outcome
 	lastErr          error
 	pendingProfile   domain.Profile
@@ -114,34 +122,22 @@ type Model struct {
 	historyDetail    bool
 	historySkipped   int
 	historyError     string
+	dashboard        dashboardLoadedMsg
+	hoverKind        string
+	hoverIndex       int
 }
 
-var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C9DFF"))
-	subtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Background(lipgloss.Color("#3151A4")).Padding(0, 1)
-	itemStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Padding(0, 1)
-	panelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#475569")).Padding(1, 2)
-	warningStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B"))
-	errorStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#EF4444"))
-	successStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#22C55E"))
-)
-
 func New(store *config.Store, settings config.Settings, version string) Model {
-	if settings.Theme == "no-color" || os.Getenv("NO_COLOR") != "" {
-		disableColors()
-	} else {
-		enableColors()
-	}
+	design := newDesignSystem(settings, os.Getenv("NO_COLOR") != "")
 	input := textinput.New()
 	input.Prompt = "› "
 	input.SetWidth(64)
 	input.SetVirtualCursor(true)
-	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
-	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C9DFF"))
+	spin := newActivitySpinner(design, settings.Motion)
 	return Model{
 		store:      store,
 		settings:   settings,
+		design:     design,
 		translator: i18n.New(settings.Language),
 		version:    version,
 		screen:     screenHome,
@@ -151,30 +147,8 @@ func New(store *config.Store, settings config.Settings, version string) Model {
 	}
 }
 
-func disableColors() {
-	titleStyle = lipgloss.NewStyle()
-	subtitleStyle = lipgloss.NewStyle()
-	selectedStyle = lipgloss.NewStyle().Padding(0, 1)
-	itemStyle = lipgloss.NewStyle().Padding(0, 1)
-	panelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
-	warningStyle = lipgloss.NewStyle()
-	errorStyle = lipgloss.NewStyle()
-	successStyle = lipgloss.NewStyle()
-}
-
-func enableColors() {
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C9DFF"))
-	subtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Background(lipgloss.Color("#3151A4")).Padding(0, 1)
-	itemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Padding(0, 1)
-	panelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#475569")).Padding(1, 2)
-	warningStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B"))
-	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#EF4444"))
-	successStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#22C55E"))
-}
-
 func (m Model) Init() tea.Cmd {
-	return nil
+	return loadDashboard(m.store)
 }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -184,10 +158,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetWidth(max(24, min(72, msg.Width-12)))
 		return m, nil
 	case spinner.TickMsg:
+		if m.screen != screenRunning || m.settings.Motion == "none" {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case runEventMsg:
+		if m.logOffset > 0 {
+			m.logOffset++
+		}
 		event := rsyncengine.Event(msg)
 		m.logLines = append(m.logLines, event.Message)
 		if len(m.logLines) > 200 {
@@ -199,7 +179,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = msg.err
 		m.screen = screenResult
 		m.cancel = nil
-		return m, nil
+		return m, loadDashboard(m.store)
 	case sshReadyMsg:
 		if msg.err != nil {
 			if m.pendingSSHAction == "browse" {
@@ -234,17 +214,27 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.browserCursor = 0
 		m.screen = screenBrowser
 		return m, nil
+	case dashboardLoadedMsg:
+		m.dashboard = msg
+		return m, nil
 	case tea.MouseWheelMsg:
+		if m.screen == screenRunning {
+			delta := -3
+			if msg.Mouse().Button == tea.MouseWheelUp {
+				delta = 3
+			}
+			m.scrollRunLog(delta)
+			return m, nil
+		}
 		code := tea.KeyDown
 		if msg.Mouse().Button == tea.MouseWheelUp {
 			code = tea.KeyUp
 		}
 		return m.handleKey(tea.KeyPressMsg(tea.Key{Code: code}))
+	case tea.MouseMotionMsg:
+		return m.handleMouseMotion(msg)
 	case tea.MouseClickMsg:
-		if msg.Mouse().Button == tea.MouseLeft && m.screen != screenRunning {
-			return m.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-		}
-		return m, nil
+		return m.handleMouseClick(msg)
 	case tea.KeyPressMsg:
 		if m.screen == screenWizard && (m.wizardStage == wizardSource || m.wizardStage == wizardDestination) && msg.String() == "ctrl+b" {
 			return m.openBrowser()
@@ -269,7 +259,7 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if value == "ctrl+c" {
 		if m.screen == screenRunning && m.cancel != nil {
 			m.cancel()
-			m.status = "Cancelling…"
+			m.status = m.translator.T("status.cancelling")
 			return m, nil
 		}
 		return m, tea.Quit
@@ -282,9 +272,16 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case screenProfiles:
 		return m.handleProfiles(value)
 	case screenRunning:
-		if value == "q" && m.cancel != nil {
-			m.cancel()
-			m.status = "Cancelling…"
+		switch value {
+		case "up", "k":
+			m.scrollRunLog(1)
+		case "down", "j":
+			m.scrollRunLog(-1)
+		case "q":
+			if m.cancel != nil {
+				m.cancel()
+				m.status = m.translator.T("status.cancelling")
+			}
 		}
 	case screenResult, screenInfo:
 		if value == "q" || value == "esc" || value == "enter" {
@@ -345,7 +342,7 @@ func (m Model) handleHome(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleSettings(key string) (tea.Model, tea.Cmd) {
-	const settingsCount = 5
+	const settingsCount = 9
 	switch key {
 	case "esc", "q":
 		m.screen = screenHome
@@ -368,12 +365,20 @@ func (m Model) changeSetting(direction int) Model {
 	case 0:
 		next.Language = cycleSetting(next.Language, []string{"auto", "de", "en"}, direction)
 	case 1:
-		next.Theme = cycleSetting(next.Theme, []string{"auto", "no-color"}, direction)
+		next.Theme = cycleSetting(next.Theme, []string{"material-dark", "material-light", "midnight", "high-contrast", "no-color"}, direction)
 	case 2:
-		next.AutoUpdate = !next.AutoUpdate
+		next.Accent = cycleSetting(next.Accent, []string{"indigo", "blue", "teal", "green", "amber", "rose", "violet"}, direction)
 	case 3:
-		next.UpdateChannel = cycleSetting(next.UpdateChannel, []string{"stable", "beta"}, direction)
+		next.Density = cycleSetting(next.Density, []string{"comfortable", "compact"}, direction)
 	case 4:
+		next.Icons = cycleSetting(next.Icons, []string{"unicode", "nerd-font"}, direction)
+	case 5:
+		next.Motion = cycleSetting(next.Motion, []string{"none", "subtle", "expressive"}, direction)
+	case 6:
+		next.AutoUpdate = !next.AutoUpdate
+	case 7:
+		next.UpdateChannel = cycleSetting(next.UpdateChannel, []string{"stable", "beta"}, direction)
+	case 8:
 		next.CheckHours = cycleIntSetting(next.CheckHours, []int{0, 1, 6, 12, 24, 168}, direction)
 	}
 	return m.saveSettings(next)
@@ -386,13 +391,20 @@ func (m Model) saveSettings(next config.Settings) Model {
 	}
 	m.settings = next
 	m.translator = i18n.New(next.Language)
-	if next.Theme == "no-color" || os.Getenv("NO_COLOR") != "" {
-		disableColors()
-	} else {
-		enableColors()
-	}
+	m.design = newDesignSystem(next, os.Getenv("NO_COLOR") != "")
+	m.spinner = newActivitySpinner(m.design, next.Motion)
 	m.status = m.translator.T("settings.saved")
 	return m
+}
+
+func newActivitySpinner(design designSystem, motion string) spinner.Model {
+	activity := spinner.Dot
+	if motion == "expressive" {
+		activity.FPS /= 2
+	}
+	result := spinner.New(spinner.WithSpinner(activity))
+	result.Style = design.Title
+	return result
 }
 
 func toggledLanguage(language string) string {
@@ -687,7 +699,7 @@ func (m Model) beginRun(profile domain.Profile, dryRun, adHoc bool) (tea.Model, 
 		m.pendingSSHAction = "run"
 		m.selected = profile
 		m.screen = screenRunning
-		m.status = "SSH authentication — native OpenSSH prompt"
+		m.status = m.translator.T("status.ssh_auth")
 		command := sshclient.MasterCommand(endpoint, controlPath)
 		return m, tea.ExecProcess(command, func(err error) tea.Msg {
 			return sshReadyMsg{err: err}
@@ -700,7 +712,7 @@ func (m Model) prepareSudo() (tea.Model, tea.Cmd) {
 	if m.pendingProfile.UseSudo {
 		m.selected = m.pendingProfile
 		m.screen = screenRunning
-		m.status = "sudo authentication — native system prompt"
+		m.status = m.translator.T("status.sudo_auth")
 		return m, tea.ExecProcess(exec.Command("sudo", "-v"), func(err error) tea.Msg {
 			return sudoReadyMsg{err: err}
 		})
@@ -714,6 +726,7 @@ func (m Model) startRun(profile domain.Profile, dryRun, adHoc bool) (tea.Model, 
 	m.screen = screenRunning
 	m.selected = profile
 	m.logLines = nil
+	m.logOffset = 0
 	m.status = ""
 	m.runEvents = make(chan tea.Msg, 128)
 	manager := job.New(m.store)
@@ -731,6 +744,9 @@ func (m Model) startRun(profile domain.Profile, dryRun, adHoc bool) (tea.Model, 
 		})
 		events <- runFinishedMsg{outcome: outcome, err: err}
 	}()
+	if m.settings.Motion == "none" {
+		return m, waitForRunEvent(m.runEvents)
+	}
 	return m, tea.Batch(m.spinner.Tick, waitForRunEvent(m.runEvents))
 }
 
@@ -750,82 +766,87 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
-	width := max(40, min(100, m.width-4))
-	header := titleStyle.Render("rsync-tui") + " " + subtitleStyle.Render("v"+m.version)
-	subtitle := subtitleStyle.Render(m.translator.T("app.subtitle"))
-	var body string
-	switch m.screen {
-	case screenHome:
-		body = m.renderHome()
-	case screenWizard:
-		body = m.renderWizard()
-	case screenProfiles:
-		body = m.renderProfiles()
-	case screenRunning:
-		body = m.renderRunning()
-	case screenResult:
-		body = m.renderResult()
-	case screenInfo:
-		body = m.status + "\n\nEnter/Esc — back"
-	case screenSettings:
-		body = m.renderSettings()
-	case screenHistory:
-		body = m.renderHistory()
-	case screenBrowser:
-		body = m.renderBrowser()
-	}
-	panel := panelStyle.Width(max(34, width-6)).Render(body)
-	return lipgloss.NewStyle().Margin(1, 2).Render(header + "\n" + subtitle + "\n\n" + panel)
+	return m.renderApplication()
 }
 
 func (m Model) renderHome() string {
-	var lines []string
-	for index, label := range m.homeItems() {
-		if index == m.cursor {
-			lines = append(lines, selectedStyle.Render("› "+label))
-		} else {
-			lines = append(lines, itemStyle.Render("  "+label))
-		}
-	}
-	if m.status != "" {
-		lines = append(lines, "", subtitleStyle.Render(m.status))
-	}
-	lines = append(lines, "", subtitleStyle.Render(m.translator.T("help.navigation")))
-	return strings.Join(lines, "\n")
+	width := max(34, m.width-8)
+	return m.renderDashboard(width, responsiveLayout(m.width))
 }
 
 func (m Model) renderSettings() string {
 	values := []string{
 		m.languageSettingLabel(),
 		m.translator.T("settings.theme." + m.settings.Theme),
+		m.translator.T("settings.accent." + m.settings.Accent),
+		m.translator.T("settings.density." + m.settings.Density),
+		m.translator.T("settings.icons." + m.settings.Icons),
+		m.translator.T("settings.motion." + m.settings.Motion),
 		m.translator.T(fmt.Sprintf("settings.bool.%t", m.settings.AutoUpdate)),
 		m.translator.T("settings.channel." + m.settings.UpdateChannel),
 		m.checkIntervalLabel(),
 	}
-	labels := []string{
-		m.translator.T("settings.language"),
-		m.translator.T("settings.theme"),
-		m.translator.T("settings.auto_update"),
-		m.translator.T("settings.update_channel"),
-		m.translator.T("settings.check_hours"),
+	labels := m.settingLabels()
+	appearance := m.renderSettingRows(labels, values, 0, 6)
+	updates := m.renderSettingRows(labels, values, 6, len(labels))
+	preview := m.renderAppearanceSegments()
+	body := m.design.Headline.Render(m.design.Icons.Settings+"  "+m.translator.T("settings.title")) + "\n" +
+		m.design.Subtitle.Render(m.translator.T("settings.appearance.subtitle")) + "\n\n" +
+		m.design.CardHigh.Render(m.design.CardTitle.Render(m.translator.T("settings.appearance"))+"\n\n"+appearance+"\n\n"+preview) + "\n\n" +
+		m.design.Card.Render(m.design.CardTitle.Render(m.translator.T("settings.behavior"))+"\n\n"+updates) + "\n\n" +
+		m.design.Subtitle.Render(m.translator.T("settings.config", m.store.Paths.ConfigDir)) + "\n" +
+		m.design.Subtitle.Render(m.translator.T("settings.help"))
+	return body
+}
+
+func (m Model) renderAppearanceSegments() string {
+	options := []string{m.settings.Theme}
+	current := m.settings.Theme
+	prefix := "settings.theme."
+	switch m.settingsCursor {
+	case 2:
+		options = []string{"indigo", "blue", "teal", "green", "amber", "rose", "violet"}
+		current = m.settings.Accent
+		prefix = "settings.accent."
+	case 3:
+		options = []string{"comfortable", "compact"}
+		current = m.settings.Density
+		prefix = "settings.density."
+	case 4:
+		options = []string{"unicode", "nerd-font"}
+		current = m.settings.Icons
+		prefix = "settings.icons."
+	case 5:
+		options = []string{"none", "subtle", "expressive"}
+		current = m.settings.Motion
+		prefix = "settings.motion."
+	default:
+		options = []string{"material-dark", "material-light", "midnight", "high-contrast", "no-color"}
 	}
-	lines := make([]string, 0, len(labels))
-	for index, label := range labels {
-		line := fmt.Sprintf("%-22s %s", label+":", values[index])
-		if index == m.settingsCursor {
-			lines = append(lines, selectedStyle.Render("› "+line))
-		} else {
-			lines = append(lines, itemStyle.Render("  "+line))
+	labels := make([]string, 0, len(options))
+	active := 0
+	for index, option := range options {
+		labels = append(labels, m.translator.T(prefix+option))
+		if option == current {
+			active = index
 		}
 	}
-	body := titleStyle.Render(m.translator.T("settings.title")) + "\n\n" +
-		strings.Join(lines, "\n") + "\n\n" +
-		subtitleStyle.Render(m.translator.T("settings.config", m.store.Paths.ConfigDir)) + "\n" +
-		subtitleStyle.Render(m.translator.T("settings.help"))
-	if m.status != "" {
-		body += "\n\n" + renderStatus(m.status)
+	return m.design.segmentedControl(labels, active, -1, max(28, min(76, m.width-24)))
+}
+
+func (m Model) renderSettingRows(labels, values []string, start, end int) string {
+	lines := make([]string, 0, end-start)
+	for index := start; index < end; index++ {
+		line := fmt.Sprintf("%-22s %s", labels[index]+":", values[index])
+		if index == m.settingsCursor {
+			lines = append(lines, m.design.Selected.Render("› "+line))
+		} else if m.isHovered("setting", index) {
+			lines = append(lines, m.design.Hover.Render("  "+line))
+		} else {
+			lines = append(lines, m.design.Item.Render("  "+line))
+		}
 	}
-	return body
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) checkIntervalLabel() string {
@@ -844,24 +865,20 @@ func (m Model) languageSettingLabel() string {
 
 func (m Model) renderWizard() string {
 	stepTitle := func(label string) string {
-		return titleStyle.Render(m.translator.T("wizard.step", int(m.wizardStage)+1, 8, label))
+		return m.design.Title.Render(m.translator.T("wizard.step", int(m.wizardStage)+1, 8, label))
 	}
 	if m.wizardStage == wizardChooseStorage {
 		labels := []string{
 			m.translator.T("wizard.storage.one_time"),
 			m.translator.T("wizard.storage.profile"),
 		}
-		lines := make([]string, 0, len(labels))
-		for index, label := range labels {
-			if index == m.profileChoice {
-				lines = append(lines, selectedStyle.Render("› "+label))
-			} else {
-				lines = append(lines, itemStyle.Render("  "+label))
-			}
+		hovered := -1
+		if m.hoverKind == "wizard-choice" {
+			hovered = m.hoverIndex
 		}
-		return stepTitle(m.translator.T("wizard.storage.title")) + "\n\n" +
-			strings.Join(lines, "\n") + "\n\n" +
-			subtitleStyle.Render(m.translator.T("wizard.storage.help"))
+		content := m.design.segmentedControl(labels, m.profileChoice, hovered, max(24, min(72, m.width-20))) + "\n\n" +
+			m.design.Subtitle.Render(m.translator.T("wizard.storage.help"))
+		return m.renderWizardFrame(stepTitle(m.translator.T("wizard.storage.title")), content)
 	}
 	if m.wizardStage == wizardName || m.wizardStage == wizardSource || m.wizardStage == wizardDestination {
 		label := m.translator.T("wizard.name.title")
@@ -875,21 +892,25 @@ func (m Model) renderWizard() string {
 		if m.wizardStage == wizardSource || m.wizardStage == wizardDestination {
 			help = "\n\n" + m.translator.T("wizard.browse_help")
 		}
-		return fmt.Sprintf("%s\n\n%s%s\n\n%s",
-			stepTitle(label),
-			m.input.View(), help, renderStatus(m.status))
+		content := m.design.Field.Render(m.input.View()) + help
+		if m.status != "" {
+			content += "\n\n" + m.renderStatus(m.status)
+		}
+		return m.renderWizardFrame(stepTitle(label), content)
 	}
 	if m.wizardStage == wizardMode {
-		var lines []string
-		for index, mode := range wizardModes(m.saveProfile) {
-			label := m.translator.T("wizard.mode." + string(mode))
-			if index == m.modeCursor {
-				lines = append(lines, selectedStyle.Render("› "+label))
-			} else {
-				lines = append(lines, itemStyle.Render("  "+label))
-			}
+		var labels []string
+		for _, mode := range wizardModes(m.saveProfile) {
+			labels = append(labels, m.translator.T("wizard.mode."+string(mode)))
 		}
-		return stepTitle(m.translator.T("wizard.mode.title")) + "\n\n" + strings.Join(lines, "\n")
+		hovered := -1
+		if m.hoverKind == "wizard-mode" {
+			hovered = m.hoverIndex
+		}
+		return m.renderWizardFrame(
+			stepTitle(m.translator.T("wizard.mode.title")),
+			m.design.segmentedControl(labels, m.modeCursor, hovered, max(24, min(72, m.width-20))),
+		)
 	}
 	if m.wizardStage == wizardAdvanced {
 		var lines []string
@@ -901,35 +922,39 @@ func (m Model) renderWizard() string {
 			}
 			label := mark + " " + option
 			if index == m.advancedCursor {
-				lines = append(lines, selectedStyle.Render("› "+label))
+				lines = append(lines, m.design.Selected.Render("› "+label))
+			} else if m.isHovered("wizard-advanced", index) {
+				lines = append(lines, m.design.Hover.Render("  "+label))
 			} else {
-				lines = append(lines, itemStyle.Render("  "+label))
+				lines = append(lines, m.design.Item.Render("  "+label))
 			}
 		}
-		return stepTitle(m.translator.T("wizard.advanced.title")) + "\n\n" +
-			strings.Join(lines, "\n") + "\n\nSpace — toggle • Enter — expert arguments"
+		content := strings.Join(lines, "\n") + "\n\n" +
+			m.design.Shortcut.Render(m.translator.T("wizard.advanced.help"))
+		return m.renderWizardFrame(stepTitle(m.translator.T("wizard.advanced.title")), content)
 	}
 	if m.wizardStage == wizardExpert {
-		return fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s",
-			stepTitle(m.translator.T("wizard.expert.title")),
-			m.input.View(),
-			subtitleStyle.Render("Use --option=value. Internal/server options and positional arguments are rejected."),
-			renderStatus(m.status))
+		content := m.design.Field.Render(m.input.View()) + "\n\n" +
+			m.design.Subtitle.Render(m.translator.T("wizard.expert.help"))
+		if m.status != "" {
+			content += "\n\n" + m.renderStatus(m.status)
+		}
+		return m.renderWizardFrame(stepTitle(m.translator.T("wizard.expert.title")), content)
 	}
 	command, err := rsyncengine.Build(m.draft, rsyncengine.BuildOptions{DryRun: m.dryRun})
 	commandText := ""
 	if err != nil {
-		commandText = errorStyle.Render(err.Error())
+		commandText = m.design.Error.Render(err.Error())
 	} else {
-		commandText = lipgloss.NewStyle().Foreground(lipgloss.Color("#93C5FD")).Render(command.Display)
+		commandText = m.design.Body.Render(command.Display)
 	}
 	danger := ""
 	if m.draft.Destructive() {
-		danger = "\n" + warningStyle.Render("Warning: this mode can remove data.")
+		danger = "\n" + m.design.Warning.Render(m.translator.T("wizard.warning.destructive"))
 	}
 	confirm := ""
 	if m.confirm > 0 {
-		confirm = "\n" + errorStyle.Render(m.translator.T("wizard.confirm_again"))
+		confirm = m.translator.T("wizard.confirm_again")
 	}
 	storage := m.translator.T("wizard.storage.one_time")
 	action := m.translator.T("wizard.action.run")
@@ -941,8 +966,7 @@ func (m Model) renderWizard() string {
 	if !m.saveProfile && m.wizardName == "" {
 		displayName = m.translator.T("history.one_time")
 	}
-	return fmt.Sprintf("%s\n\n%s: %s\n%s: %s\n%s → %s\n%s: %s\n%s: %s\n%s: %s%s\n\n%s\n\n[d] dry-run  [s] source semantics  [Enter] %s%s\n%s",
-		stepTitle(m.translator.T("wizard.review.title")),
+	summary := fmt.Sprintf("%s: %s\n%s: %s\n%s → %s\n%s: %s\n%s: %s\n%s: %s%s",
 		m.translator.T("wizard.name.title"),
 		displayName,
 		m.translator.T("wizard.storage.title"),
@@ -955,63 +979,159 @@ func (m Model) renderWizard() string {
 		m.draft.SourceSemantics,
 		m.translator.T("wizard.dry_run"),
 		m.translator.T(fmt.Sprintf("settings.bool.%t", m.dryRun)),
-		danger,
-		commandText,
-		action,
-		confirm,
-		renderStatus(m.status))
+		danger)
+	content := m.design.CardHigh.Render(summary) + "\n\n" +
+		m.design.Card.Render(m.design.CardTitle.Render(m.translator.T("history.command"))+"\n"+commandText) + "\n\n" +
+		m.design.Shortcut.Render(m.translator.T("wizard.review.help", action))
+	if confirm != "" {
+		content += "\n\n" + m.design.dialog(
+			m.translator.T("wizard.warning.destructive"),
+			confirm,
+			max(24, min(72, m.width-20)),
+			true,
+		)
+	}
+	if m.status != "" {
+		content += "\n\n" + m.renderStatus(m.status)
+	}
+	return m.renderWizardFrame(stepTitle(m.translator.T("wizard.review.title")), content)
+}
+
+func (m Model) renderWizardFrame(title, content string) string {
+	return m.renderWizardStepper() + "\n\n" +
+		title + "\n\n" +
+		m.design.CardHigh.Render(content)
+}
+
+func (m Model) renderWizardStepper() string {
+	if m.width < 76 {
+		return m.design.chip(fmt.Sprintf("%d / 8", int(m.wizardStage)+1), true)
+	}
+	labels := []string{
+		m.translator.T("wizard.storage.title"),
+		m.translator.T("wizard.name.title"),
+		m.translator.T("wizard.source"),
+		m.translator.T("wizard.destination"),
+		m.translator.T("wizard.mode.title"),
+		m.translator.T("wizard.advanced.title"),
+		m.translator.T("wizard.expert.title"),
+		m.translator.T("wizard.review.title"),
+	}
+	steps := make([]string, 0, len(labels))
+	for index, label := range labels {
+		mark := "○"
+		style := m.design.Subtitle
+		if index < int(m.wizardStage) {
+			mark = m.design.Icons.Success
+			style = m.design.Success
+		}
+		if index == int(m.wizardStage) {
+			mark = "●"
+			style = m.design.Title
+		}
+		steps = append(steps, style.Render(mark+" "+truncateDisplay(label, 12)))
+	}
+	return strings.Join(steps, "  ")
 }
 
 func (m Model) renderProfiles() string {
 	if len(m.profiles) == 0 {
-		return m.translator.T("status.no_profiles") + "\n\nEsc — back"
+		return m.design.Headline.Render(m.design.Icons.Profiles+"  "+m.translator.T("menu.profiles")) + "\n\n" +
+			m.design.emptyState(m.design.Icons.Profiles, m.translator.T("status.no_profiles"), m.translator.T("profiles.subtitle")) + "\n\n" +
+			m.design.Shortcut.Render(m.translator.T("help.back"))
 	}
-	var lines []string
+	var cards []string
 	for index, profile := range m.profiles {
-		label := fmt.Sprintf("%s  [%s]  %s → %s", profile.Name, profile.Mode, profile.Source.Address(false), profile.Destination.Address(false))
-		if index == m.cursor {
-			lines = append(lines, selectedStyle.Render("› "+label))
-		} else {
-			lines = append(lines, itemStyle.Render("  "+label))
-		}
+		title := fmt.Sprintf("%s  %s", m.design.Icons.Profiles, profile.Name)
+		body := fmt.Sprintf("%s  ·  %s → %s",
+			m.translator.T("wizard.mode."+string(profile.Mode)),
+			profile.Source.Address(false),
+			profile.Destination.Address(false))
+		cards = append(cards, m.design.card(title, body, 0, index == m.cursor, m.isHovered("profile", index), false))
 	}
-	return titleStyle.Render("Profiles") + "\n\n" + strings.Join(lines, "\n") + "\n\nEnter — run • Esc — back"
+	return m.design.Headline.Render(m.design.Icons.Profiles+"  "+m.translator.T("menu.profiles")) + "\n" +
+		m.design.Subtitle.Render(m.translator.T("profiles.subtitle")) + "\n\n" +
+		strings.Join(cards, "\n\n") + "\n\n" +
+		m.design.Shortcut.Render(m.translator.T("profiles.help"))
 }
 
 func (m Model) renderRunning() string {
-	lines := m.logLines
-	limit := max(4, m.height-14)
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
+	limit := max(2, m.height-22)
+	maxOffset := max(0, len(m.logLines)-limit)
+	offset := min(maxOffset, max(0, m.logOffset))
+	end := len(m.logLines) - offset
+	start := max(0, end-limit)
+	lines := m.logLines[start:end]
+	if offset > 0 {
+		lines = append([]string{m.translator.T("running.scrolled", offset)}, lines...)
 	}
 	name := m.selected.Name
 	if m.pendingAdHoc && name == domain.DefaultAdHocName {
 		name = m.translator.T("history.one_time")
 	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s\n\nCtrl+C — cancel",
-		m.spinner.View(),
-		titleStyle.Render("Running "+name),
-		subtitleStyle.Render(m.status),
-		strings.Join(lines, "\n"))
+	indicator := "●"
+	if m.settings.Motion != "none" {
+		indicator = m.spinner.View()
+	}
+	progress := m.renderProgressIndicator(max(20, min(72, m.width-18)))
+	header := m.design.CardPrimary.Render(fmt.Sprintf("%s  %s\n%s",
+		indicator,
+		m.translator.T("page.running"),
+		name))
+	logBody := strings.Join(lines, "\n")
+	if strings.TrimSpace(logBody) == "" {
+		logBody = m.translator.T("running.waiting")
+	}
+	cancelLabel := "Ctrl+C  " + m.translator.T("action.cancel")
+	cancelStyle := m.design.ChipPrimary
+	if m.isHovered("cancel", 0) {
+		cancelLabel = "› " + cancelLabel
+		cancelStyle = m.design.Selected
+	}
+	return header + "\n\n" +
+		progress + "\n\n" +
+		m.design.CardHigh.Render(m.design.CardTitle.Render(m.translator.T("running.activity"))+"\n\n"+logBody) + "\n\n" +
+		cancelStyle.Render(cancelLabel)
+}
+
+func (m *Model) scrollRunLog(delta int) {
+	limit := max(2, m.height-22)
+	m.logOffset = min(max(0, len(m.logLines)-limit), max(0, m.logOffset+delta))
 }
 
 func (m Model) renderResult() string {
-	style := successStyle
-	title := "Completed successfully"
+	style := m.design.Success
+	icon := m.design.Icons.Success
+	title := m.translator.T("result.success")
 	if m.lastErr != nil {
-		style = errorStyle
-		title = "Transfer failed"
+		style = m.design.Error
+		icon = m.design.Icons.Error
+		title = m.translator.T("result.failure")
 	}
-	result, _ := json.MarshalIndent(m.lastOutcome.Result, "", "  ")
-	warnings := ""
+	result := m.lastOutcome.Result
+	summary := []string{
+		fmt.Sprintf("%s: %s", m.translator.T("history.name"), m.historyEntryName(result)),
+		fmt.Sprintf("%s: %s", m.translator.T("history.mode"), m.historyModeLabel(result.Mode)),
+		fmt.Sprintf("%s: %s", m.translator.T("history.duration"), formatHistoryDuration(result)),
+		fmt.Sprintf("%s: %d", m.translator.T("history.exit_code"), result.ExitCode),
+	}
+	if result.Source != "" || result.Destination != "" {
+		summary = append(summary, fmt.Sprintf("%s → %s", result.Source, result.Destination))
+	}
+	if result.Error != "" {
+		summary = append(summary, "", m.design.Error.Render(result.Error))
+	}
 	if len(m.lastOutcome.NotificationWarnings) > 0 {
-		warnings = fmt.Sprintf("\n\n%d notification(s) failed.", len(m.lastOutcome.NotificationWarnings))
+		summary = append(summary, "", m.design.Warning.Render(
+			m.translator.T("result.notification_warnings", len(m.lastOutcome.NotificationWarnings))))
 	}
-	return style.Render(title) + "\n\n" + string(result) + warnings + "\n\nEnter/Esc — back"
+	return m.design.CardPrimary.Render(style.Render(icon+"  "+title)) + "\n\n" +
+		m.design.CardHigh.Render(strings.Join(summary, "\n")) + "\n\n" +
+		m.design.Shortcut.Render(m.translator.T("result.help"))
 }
 
 func (m Model) renderBrowser() string {
-	var lines []string
+	var cards []string
 	limit := max(5, m.height-16)
 	start := 0
 	if m.browserCursor >= limit {
@@ -1020,20 +1140,39 @@ func (m Model) renderBrowser() string {
 	end := min(len(m.browserEntries), start+limit)
 	for index := start; index < end; index++ {
 		entry := m.browserEntries[index]
-		label := entry.Name + "/"
-		if index == m.browserCursor {
-			lines = append(lines, selectedStyle.Render("› "+label))
-		} else {
-			lines = append(lines, itemStyle.Render("  "+label))
-		}
+		label := m.design.Icons.Folder + "  " + entry.Name + "/"
+		cards = append(cards, m.design.card(label, entry.Path, 0, index == m.browserCursor, m.isHovered("browser", index), false))
 	}
-	if len(lines) == 0 {
-		lines = append(lines, subtitleStyle.Render("No accessible subdirectories."))
+	if len(cards) == 0 {
+		cards = append(cards, m.design.emptyState(m.design.Icons.Folder, m.translator.T("browser.empty"), ""))
 	}
-	return titleStyle.Render("Directory browser") + "\n" +
-		subtitleStyle.Render(m.browserCurrent) + "\n\n" +
-		strings.Join(lines, "\n") +
-		"\n\nEnter — open • s — select current • h — hidden • Esc — back"
+	endpoint := m.design.Icons.Folder
+	if m.browserEndpoint.IsRemote() {
+		endpoint = m.design.Icons.Remote
+	}
+	chips := m.design.chip(endpoint+"  "+m.browserCurrent, true) + " " +
+		m.design.chip(m.translator.T(fmt.Sprintf("settings.bool.%t", m.browserHidden))+" "+m.translator.T("browser.hidden"), false)
+	return m.design.Headline.Render(m.translator.T("page.browser")) + "\n\n" +
+		chips + "\n\n" +
+		strings.Join(cards, "\n") + "\n\n" +
+		m.design.Shortcut.Render(m.translator.T("browser.help"))
+}
+
+func (m Model) renderProgressIndicator(width int) string {
+	width = max(10, width)
+	if m.settings.Motion == "none" {
+		return m.design.Divider.Render(strings.Repeat("━", width))
+	}
+	position := len(m.logLines) % max(1, width-5)
+	activeWidth := 5
+	if m.settings.Motion == "expressive" {
+		activeWidth = 9
+	}
+	bar := strings.Repeat("─", position) + strings.Repeat("━", activeWidth)
+	if remaining := width - lipgloss.Width(bar); remaining > 0 {
+		bar += strings.Repeat("─", remaining)
+	}
+	return m.design.Title.Render(bar)
 }
 
 func (m Model) openBrowser() (tea.Model, tea.Cmd) {
@@ -1068,7 +1207,7 @@ func (m Model) openBrowser() (tea.Model, tea.Cmd) {
 	m.sshControlPath = controlPath
 	m.pendingSSHAction = "browse"
 	m.screen = screenRunning
-	m.status = "SSH authentication — native OpenSSH prompt"
+	m.status = m.translator.T("status.ssh_auth")
 	command := sshclient.MasterCommand(endpoint, controlPath)
 	return m, tea.ExecProcess(command, func(err error) tea.Msg {
 		return sshReadyMsg{err: err}
@@ -1144,7 +1283,7 @@ func (m *Model) showSnapshotInfo() {
 		}
 	}
 	if len(lines) == 0 {
-		lines = append(lines, "No snapshot profiles configured.")
+		lines = append(lines, m.translator.T("snapshot.empty"))
 	}
 	m.status = strings.Join(lines, "\n")
 	m.screen = screenInfo
@@ -1159,7 +1298,7 @@ func (m *Model) showScheduleInfo() {
 		}
 	}
 	if len(lines) == 0 {
-		lines = append(lines, "No schedules configured.")
+		lines = append(lines, m.translator.T("schedule.empty"))
 	}
 	m.status = strings.Join(lines, "\n")
 	m.screen = screenInfo
@@ -1211,14 +1350,14 @@ func (m Model) handleHistory(key string) (tea.Model, tea.Cmd) {
 
 func (m Model) renderHistory() string {
 	if m.historyError != "" {
-		return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
-			errorStyle.Render(m.historyError) + "\n\n" +
-			subtitleStyle.Render(m.translator.T("history.help.back"))
+		return m.design.Title.Render(m.translator.T("history.title")) + "\n\n" +
+			m.design.Error.Render(m.historyError) + "\n\n" +
+			m.design.Subtitle.Render(m.translator.T("history.help.back"))
 	}
 	if len(m.history) == 0 {
-		return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
-			subtitleStyle.Render(m.translator.T("history.empty")) + "\n\n" +
-			subtitleStyle.Render(m.translator.T("history.help.back"))
+		return m.design.Title.Render(m.translator.T("history.title")) + "\n\n" +
+			m.design.Subtitle.Render(m.translator.T("history.empty")) + "\n\n" +
+			m.design.Subtitle.Render(m.translator.T("history.help.back"))
 	}
 	if m.historyDetail {
 		return m.renderHistoryDetail(m.history[m.historyCursor])
@@ -1231,23 +1370,22 @@ func (m Model) renderHistory() string {
 	}
 	end := min(len(m.history), start+visible)
 	width := max(30, min(92, m.width-14))
-	lines := make([]string, 0, (end-start)*3)
+	cards := make([]string, 0, end-start)
 	for index := start; index < end; index++ {
 		entry := m.history[index]
 		name := m.historyEntryName(entry)
 		mode := m.historyModeLabel(entry.Mode)
 		status := "✓"
-		statusStyle := successStyle
+		statusStyle := m.design.Success
 		if entry.ExitCode != 0 {
 			status = "✗"
-			statusStyle = errorStyle
+			statusStyle = m.design.Error
 		}
 		dryRun := ""
 		if entry.DryRun {
 			dryRun = " · " + m.translator.T("history.dry_run")
 		}
-		header := fmt.Sprintf("%s  %s  %s [%s] · %s%s",
-			status,
+		header := fmt.Sprintf("%s  %s [%s] · %s%s",
 			formatHistoryTime(entry.StartedAt),
 			name,
 			mode,
@@ -1257,36 +1395,25 @@ func (m Model) renderHistory() string {
 		if entry.Source == "" && entry.Destination == "" {
 			pathLine = m.translator.T("history.legacy_entry")
 		}
-		header = truncateDisplay(header, width)
+		header = statusStyle.Render(status) + "  " + truncateDisplay(header, width-4)
 		pathLine = truncateDisplay(pathLine, width)
-		if index == m.historyCursor {
-			lines = append(lines,
-				selectedStyle.Render("› "+header),
-				selectedStyle.Render("  "+pathLine))
-		} else {
-			lines = append(lines,
-				itemStyle.Render("  "+statusStyle.Render(status)+strings.TrimPrefix(header, status)),
-				subtitleStyle.Render("    "+pathLine))
-		}
-		if index+1 < end {
-			lines = append(lines, "")
-		}
+		cards = append(cards, m.design.card(header, pathLine, 0, index == m.historyCursor, m.isHovered("history", index), false))
 	}
 	footer := m.translator.T("history.help.list")
 	if m.historySkipped > 0 {
 		footer = m.translator.T("history.skipped", m.historySkipped) + "\n" + footer
 	}
-	return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
-		strings.Join(lines, "\n") + "\n\n" +
-		subtitleStyle.Render(footer)
+	return m.design.Headline.Render(m.design.Icons.History+"  "+m.translator.T("history.title")) + "\n\n" +
+		strings.Join(cards, "\n") + "\n\n" +
+		m.design.Subtitle.Render(footer)
 }
 
 func (m Model) renderHistoryDetail(entry rsyncengine.Result) string {
 	status := m.translator.T("history.status.success")
-	statusText := successStyle.Render(status)
+	statusText := m.design.Success.Render(status)
 	if entry.ExitCode != 0 {
 		status = m.translator.T("history.status.failure")
-		statusText = errorStyle.Render(status)
+		statusText = m.design.Error.Render(status)
 	}
 	lines := []string{
 		fmt.Sprintf("%s: %s", m.translator.T("history.name"), m.historyEntryName(entry)),
@@ -1307,7 +1434,7 @@ func (m Model) renderHistoryDetail(entry rsyncengine.Result) string {
 		lines = append(lines, fmt.Sprintf("%s: %s", m.translator.T("history.destination"), entry.Destination))
 	}
 	if entry.Error != "" {
-		lines = append(lines, "", errorStyle.Render(m.translator.T("history.error")+": "+entry.Error))
+		lines = append(lines, "", m.design.Error.Render(m.translator.T("history.error")+": "+entry.Error))
 	}
 	if entry.Command != "" {
 		commandWidth := max(28, min(90, m.width-16))
@@ -1315,9 +1442,9 @@ func (m Model) renderHistoryDetail(entry rsyncengine.Result) string {
 			m.translator.T("history.command")+":",
 			lipgloss.NewStyle().Width(commandWidth).Render(entry.Command))
 	}
-	return titleStyle.Render(m.translator.T("history.detail_title")) + "\n\n" +
-		strings.Join(lines, "\n") + "\n\n" +
-		subtitleStyle.Render(m.translator.T("history.help.detail"))
+	return m.design.Headline.Render(m.translator.T("history.detail_title")) + "\n\n" +
+		m.design.CardHigh.Render(strings.Join(lines, "\n")) + "\n\n" +
+		m.design.Subtitle.Render(m.translator.T("history.help.detail"))
 }
 
 func (m Model) historyEntryName(entry rsyncengine.Result) string {
@@ -1369,6 +1496,10 @@ func truncateDisplay(value string, width int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
+}
+
+func (m Model) isHovered(kind string, index int) bool {
+	return m.hoverKind == kind && m.hoverIndex == index
 }
 
 func (m Model) homeItems() []string {
@@ -1474,11 +1605,11 @@ func endpointString(endpoint domain.Endpoint) string {
 	return endpoint.Path
 }
 
-func renderStatus(status string) string {
+func (m Model) renderStatus(status string) string {
 	if status == "" {
 		return ""
 	}
-	return errorStyle.Render(status)
+	return m.design.Error.Render(status)
 }
 
 func min(a, b int) int {

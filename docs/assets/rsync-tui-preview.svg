@@ -1,27 +1,57 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-labelledby="title desc">
-  <title id="title">rsync-tui dashboard preview</title>
-  <desc id="desc">Dark terminal window showing the rsync-tui main menu with New transfer selected.</desc>
-  <rect width="960" height="560" rx="18" fill="#0f172a"/>
-  <rect x="1" y="1" width="958" height="558" rx="17" fill="none" stroke="#334155" stroke-width="2"/>
-  <circle cx="30" cy="28" r="7" fill="#ef4444"/>
-  <circle cx="54" cy="28" r="7" fill="#f59e0b"/>
-  <circle cx="78" cy="28" r="7" fill="#22c55e"/>
-  <text x="480" y="34" fill="#94a3b8" font-family="monospace" font-size="15" text-anchor="middle">fabian@homelab — rsync-tui</text>
-  <line x1="0" y1="52" x2="960" y2="52" stroke="#334155"/>
+  <title id="title">rsync-tui Material dashboard preview</title>
+  <desc id="desc">Dark terminal window showing the responsive Material dashboard with navigation rail and transfer cards.</desc>
+  <rect width="960" height="560" rx="18" fill="#111318"/>
+  <rect x="1" y="1" width="958" height="558" rx="17" fill="none" stroke="#8e9099" stroke-width="2"/>
+  <circle cx="28" cy="26" r="7" fill="#ff6b6b"/>
+  <circle cx="52" cy="26" r="7" fill="#ffb95f"/>
+  <circle cx="76" cy="26" r="7" fill="#72da8c"/>
+  <text x="480" y="32" fill="#8e9099" font-family="monospace" font-size="14" text-anchor="middle">fabian@homelab — rsync-tui</text>
 
-  <text x="55" y="94" fill="#7c9dff" font-family="monospace" font-size="28" font-weight="700">rsync-tui</text>
-  <text x="220" y="94" fill="#94a3b8" font-family="monospace" font-size="16">v0.1.2</text>
-  <text x="55" y="124" fill="#94a3b8" font-family="monospace" font-size="16">Safe local and SSH transfers powered by rsync</text>
+  <rect x="0" y="48" width="960" height="66" fill="#191c20"/>
+  <text x="34" y="87" fill="#bbc3ff" font-family="monospace" font-size="25" font-weight="700">◆  rsync-tui</text>
+  <text x="220" y="86" fill="#c4c6d0" font-family="monospace" font-size="15">· Dashboard</text>
+  <rect x="715" y="66" width="72" height="29" rx="14" fill="#2b303b"/>
+  <text x="751" y="86" fill="#c4c6d0" font-family="monospace" font-size="13" text-anchor="middle">v0.1.3</text>
+  <rect x="796" y="66" width="48" height="29" rx="14" fill="#2b303b"/>
+  <text x="820" y="86" fill="#c4c6d0" font-family="monospace" font-size="13" text-anchor="middle">EN</text>
+  <rect x="853" y="66" width="82" height="29" rx="14" fill="#3e477d"/>
+  <text x="894" y="86" fill="#dee0ff" font-family="monospace" font-size="13" text-anchor="middle">Indigo</text>
 
-  <rect x="50" y="152" width="860" height="336" rx="12" fill="#111c32" stroke="#475569" stroke-width="2"/>
-  <rect x="82" y="184" width="796" height="40" rx="6" fill="#3151a4"/>
-  <text x="104" y="210" fill="#f8fafc" font-family="monospace" font-size="18" font-weight="700">› New transfer</text>
-  <text x="104" y="256" fill="#cbd5e1" font-family="monospace" font-size="18">  Profiles</text>
-  <text x="104" y="296" fill="#cbd5e1" font-family="monospace" font-size="18">  Snapshots &amp; restore</text>
-  <text x="104" y="336" fill="#cbd5e1" font-family="monospace" font-size="18">  Schedules</text>
-  <text x="104" y="376" fill="#cbd5e1" font-family="monospace" font-size="18">  History</text>
-  <text x="104" y="416" fill="#cbd5e1" font-family="monospace" font-size="18">  Settings</text>
-  <text x="104" y="456" fill="#cbd5e1" font-family="monospace" font-size="18">  Quit</text>
+  <rect x="28" y="134" width="220" height="366" rx="16" fill="#24272d"/>
+  <text x="52" y="170" fill="#bbc3ff" font-family="monospace" font-size="18" font-weight="700">◆  rsync-tui</text>
+  <rect x="44" y="190" width="188" height="40" rx="13" fill="#3e477d"/>
+  <text x="62" y="216" fill="#dee0ff" font-family="monospace" font-size="16" font-weight="700">⌂  Dashboard</text>
+  <text x="62" y="260" fill="#e2e2e9" font-family="monospace" font-size="15">＋  New transfer</text>
+  <text x="62" y="300" fill="#e2e2e9" font-family="monospace" font-size="15">▤  Profiles</text>
+  <text x="62" y="340" fill="#e2e2e9" font-family="monospace" font-size="15">◫  Snapshots</text>
+  <text x="62" y="380" fill="#e2e2e9" font-family="monospace" font-size="15">◷  Schedules</text>
+  <text x="62" y="420" fill="#e2e2e9" font-family="monospace" font-size="15">↶  History</text>
+  <text x="62" y="460" fill="#e2e2e9" font-family="monospace" font-size="15">⚙  Settings</text>
 
-  <text x="55" y="524" fill="#64748b" font-family="monospace" font-size="15">↑/↓ move • Enter select • l language • q quit</text>
+  <text x="278" y="158" fill="#e2e2e9" font-family="monospace" font-size="24" font-weight="700">Welcome back</text>
+  <text x="278" y="184" fill="#c4c6d0" font-family="monospace" font-size="14">Safe transfers, profiles and schedules at a glance</text>
+
+  <rect x="278" y="206" width="382" height="108" rx="16" fill="#3e477d"/>
+  <text x="302" y="245" fill="#dee0ff" font-family="monospace" font-size="19" font-weight="700">＋  New transfer</text>
+  <text x="302" y="278" fill="#dee0ff" font-family="monospace" font-size="14">Start a guided local or SSH transfer</text>
+
+  <rect x="680" y="206" width="248" height="76" rx="15" fill="#191c20" stroke="#8e9099"/>
+  <text x="704" y="237" fill="#e2e2e9" font-family="monospace" font-size="16" font-weight="700">▤  Profiles</text>
+  <text x="704" y="261" fill="#c4c6d0" font-family="monospace" font-size="13">4 configured</text>
+
+  <rect x="680" y="296" width="248" height="76" rx="15" fill="#191c20" stroke="#8e9099"/>
+  <text x="704" y="327" fill="#e2e2e9" font-family="monospace" font-size="16" font-weight="700">◫  Snapshots</text>
+  <text x="704" y="351" fill="#c4c6d0" font-family="monospace" font-size="13">2 configured</text>
+
+  <rect x="680" y="386" width="248" height="76" rx="15" fill="#191c20" stroke="#8e9099"/>
+  <text x="704" y="417" fill="#e2e2e9" font-family="monospace" font-size="16" font-weight="700">◷  Schedules</text>
+  <text x="704" y="441" fill="#c4c6d0" font-family="monospace" font-size="13">1 configured</text>
+
+  <rect x="278" y="334" width="382" height="128" rx="16" fill="#24272d"/>
+  <text x="302" y="369" fill="#e2e2e9" font-family="monospace" font-size="16" font-weight="700">↶  Recent activity</text>
+  <text x="302" y="401" fill="#72da8c" font-family="monospace" font-size="14">✓  Photos backup · 2m ago</text>
+  <text x="302" y="429" fill="#72da8c" font-family="monospace" font-size="14">✓  Documents · 1h ago</text>
+
+  <text x="30" y="535" fill="#8e9099" font-family="monospace" font-size="14">↑/↓ move  •  Enter select  •  l language  •  q quit</text>
 </svg>

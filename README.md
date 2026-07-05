@@ -8,7 +8,7 @@ file transfers with `rsync`. It is designed for Raspberry Pi,
 OpenMediaVault, Debian/Ubuntu servers, removable storage and homelabs that are
 often administered through SSH.
 
-> `v0.1.2` is a beta release. Always inspect the command and use the preselected
+> `v0.1.3` is a beta release. Always inspect the command and use the preselected
 > dry-run before destructive Mirror or Move operations.
 
 [Deutsche Dokumentation](README.de.md)
@@ -18,6 +18,7 @@ often administered through SSH.
 ## Highlights
 
 - Responsive Bubble Tea interface with keyboard and mouse support
+- Responsive Material 3-inspired dashboard, cards, steppers and status surfaces
 - English and German UI with automatic locale detection
 - Local directory browser for `/`, home, `/srv`, `/mnt`, `/media` and detected mounts
 - SSH push/pull, native OpenSSH authentication and remote directory browser
@@ -123,6 +124,14 @@ mode `0600` on Linux.
 The update check interval in Settings includes **Every start**. It applies only
 when launching the TUI and remains disabled when automatic updates are off.
 
+### Appearance
+
+The interface defaults to Material Dark with an Indigo accent. Settings offer
+Material Dark, Material Light, Midnight, High Contrast and No Color themes,
+seven accent palettes, comfortable or compact density, Unicode or optional
+Nerd Font icons, and no/subtle/expressive motion. `NO_COLOR` always disables
+ANSI styling without overwriting the saved preference.
+
 Example schedule and notification configuration:
 
 ```bash
@@ -185,7 +194,7 @@ Release tags trigger static builds for Linux amd64, arm64 and armv7. Release
 manifests are Ed25519-signed and accompanied by SHA-256 sums, an SBOM and
 GitHub build provenance.
 
-## Limitations of v0.1.2
+## Limitations of v0.1.3
 
 - Linux only
 - no rsync daemon configuration

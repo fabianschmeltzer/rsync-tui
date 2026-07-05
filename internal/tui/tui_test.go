@@ -50,6 +50,9 @@ func TestNoColorTheme(t *testing.T) {
 	if strings.ContainsRune(model.render(), '\x1b') {
 		t.Fatal("no-color theme emitted ANSI escape sequences")
 	}
+	if card := model.design.card("Selected", "Hovered", 32, true, true, true); strings.ContainsRune(card, '\x1b') {
+		t.Fatal("interactive no-color card emitted ANSI escape sequences")
+	}
 }
 
 func TestSettingsCanBeChangedAndPersisted(t *testing.T) {
@@ -78,21 +81,21 @@ func TestSettingsCanBeChangedAndPersisted(t *testing.T) {
 		t.Fatalf("settings did not switch to German: %s", rendered)
 	}
 
-	model.settingsCursor = 1
-	model = model.changeSetting(1)
-	model.settingsCursor = 2
-	model = model.changeSetting(1)
-	model.settingsCursor = 3
-	model = model.changeSetting(1)
-	model.settingsCursor = 4
-	model = model.changeSetting(1)
+	for cursor := 1; cursor < 9; cursor++ {
+		model.settingsCursor = cursor
+		model = model.changeSetting(1)
+	}
 
 	persisted, err := store.LoadSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if persisted.Language != "de" ||
-		persisted.Theme != "no-color" ||
+		persisted.Theme != "material-light" ||
+		persisted.Accent != "blue" ||
+		persisted.Density != "compact" ||
+		persisted.Icons != "nerd-font" ||
+		persisted.Motion != "expressive" ||
 		persisted.AutoUpdate ||
 		persisted.UpdateChannel != "stable" ||
 		persisted.CheckHours != 168 {

@@ -17,6 +17,10 @@ type Settings struct {
 	SchemaVersion int    `toml:"schema_version"`
 	Language      string `toml:"language"`
 	Theme         string `toml:"theme"`
+	Accent        string `toml:"accent"`
+	Density       string `toml:"density"`
+	Icons         string `toml:"icons"`
+	Motion        string `toml:"motion"`
 	AutoUpdate    bool   `toml:"auto_update"`
 	UpdateChannel string `toml:"update_channel"`
 	CheckHours    int    `toml:"check_hours"`
@@ -26,7 +30,11 @@ func DefaultSettings() Settings {
 	return Settings{
 		SchemaVersion: 1,
 		Language:      "auto",
-		Theme:         "auto",
+		Theme:         "material-dark",
+		Accent:        "indigo",
+		Density:       "comfortable",
+		Icons:         "unicode",
+		Motion:        "subtle",
 		AutoUpdate:    true,
 		UpdateChannel: "beta",
 		CheckHours:    24,
@@ -104,16 +112,48 @@ func (s *Store) LoadSettings() (Settings, error) {
 	if settings.CheckHours < 0 {
 		settings.CheckHours = DefaultSettings().CheckHours
 	}
-	return settings, nil
+	return normalizeSettings(settings), nil
 }
 
 func (s *Store) SaveSettings(settings Settings) error {
-	settings.SchemaVersion = 1
+	settings = normalizeSettings(settings)
 	data, err := toml.Marshal(settings)
 	if err != nil {
 		return err
 	}
 	return atomicWrite(filepath.Join(s.Paths.ConfigDir, "config.toml"), data, 0o600)
+}
+
+func normalizeSettings(settings Settings) Settings {
+	settings.SchemaVersion = 1
+	if settings.Theme == "auto" {
+		settings.Theme = "material-dark"
+	}
+	if !oneOf(settings.Theme, "material-dark", "material-light", "midnight", "high-contrast", "no-color") {
+		settings.Theme = "material-dark"
+	}
+	if !oneOf(settings.Accent, "indigo", "blue", "teal", "green", "amber", "rose", "violet") {
+		settings.Accent = "indigo"
+	}
+	if !oneOf(settings.Density, "comfortable", "compact") {
+		settings.Density = "comfortable"
+	}
+	if !oneOf(settings.Icons, "unicode", "nerd-font") {
+		settings.Icons = "unicode"
+	}
+	if !oneOf(settings.Motion, "none", "subtle", "expressive") {
+		settings.Motion = "subtle"
+	}
+	return settings
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) SaveProfile(profile domain.Profile) error {

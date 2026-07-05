@@ -5,6 +5,24 @@ Semantic Versioning.
 
 ## [Unreleased][]
 
+## [0.1.3][] - 2026-07-05
+
+### Added
+
+- Added a responsive Material 3-inspired dashboard with app bar, navigation
+  rail, cards, chips, steppers, snackbars and adaptive compact layouts
+- Added configurable Material Dark, Material Light, Midnight, High Contrast
+  and No Color themes with accent, density, icon and motion preferences
+- Added optional Nerd Font icons with a portable Unicode fallback
+- Added real mouse hit targets and hover states for cards, lists and controls
+
+### Changed
+
+- Redesigned the wizard, profiles, history, settings, directory browser,
+  running transfer and result views around a shared per-model design system
+- Replaced raw transfer-result JSON with readable Material summary cards
+- Completed English and German localization of visible TUI status text
+
 ## [0.1.2][] - 2026-07-05
 
 ### Added
@@ -47,7 +65,8 @@ Semantic Versioning.
 - ntfy, Gotify, generic webhook, Sendmail and SMTP/TLS notifications
 - Signed automatic updates, rollback, multi-architecture release workflow and SBOM
 
-[Unreleased]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fabianschmeltzer/rsync-tui/releases/tag/v0.1.0
