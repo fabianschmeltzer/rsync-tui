@@ -3,8 +3,8 @@ set -eu
 
 REPOSITORY="fabianschmeltzer/rsync-tui"
 VERSION="${VERSION:-v0.1.0}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 NO_SYSTEMD="${NO_SYSTEMD:-0}"
+DEFAULT_INSTALL_DIR=0
 
 case "$(uname -s)" in
     Linux) ;;
@@ -13,6 +13,15 @@ case "$(uname -s)" in
         exit 1
         ;;
 esac
+
+if [ -z "${INSTALL_DIR:-}" ]; then
+    DEFAULT_INSTALL_DIR=1
+    if [ "$(id -u)" -eq 0 ]; then
+        INSTALL_DIR="/usr/local/bin"
+    else
+        INSTALL_DIR="$HOME/.local/bin"
+    fi
+fi
 
 case "$(uname -m)" in
     x86_64|amd64) TARGET="amd64" ;;
@@ -64,7 +73,23 @@ install -m 0755 "$TMP_DIR/rsync-tui" "$INSTALL_DIR/rsync-tui"
 
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
-    *) echo "Add $INSTALL_DIR to PATH." ;;
+    *)
+        if [ "$DEFAULT_INSTALL_DIR" = "1" ]; then
+            PROFILE="$HOME/.profile"
+            if [ "$(id -u)" -eq 0 ]; then
+                PATH_LINE="export PATH=\"/usr/local/bin:\$PATH\""
+            else
+                PATH_LINE="export PATH=\"\$HOME/.local/bin:\$PATH\""
+            fi
+            if ! grep -Fqx "$PATH_LINE" "$PROFILE" 2>/dev/null; then
+                printf '\n%s\n' "$PATH_LINE" >> "$PROFILE"
+            fi
+            echo "Added $INSTALL_DIR to PATH in $PROFILE."
+            echo "Open a new shell or run: . \"$PROFILE\""
+        else
+            echo "Add $INSTALL_DIR to PATH."
+        fi
+        ;;
 esac
 
 if [ "$NO_SYSTEMD" != "1" ] && command -v systemctl >/dev/null 2>&1; then
@@ -97,4 +122,7 @@ EOF
 fi
 
 echo "Installed: $INSTALL_DIR/rsync-tui"
-echo "Run: rsync-tui doctor"
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) echo "Run: rsync-tui doctor" ;;
+    *) echo "Run now: $INSTALL_DIR/rsync-tui doctor" ;;
+esac

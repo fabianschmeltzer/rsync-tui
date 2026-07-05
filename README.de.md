@@ -44,7 +44,10 @@ less install.sh
 sh install.sh
 ```
 
-Standardziel ist `~/.local/bin/rsync-tui`. Danach:
+Als Root installiert das Skript standardmäßig nach
+`/usr/local/bin/rsync-tui`, sonst nach `~/.local/bin/rsync-tui`. Falls das
+Benutzerverzeichnis noch nicht im `PATH` steht, ergänzt das Skript
+`~/.profile`; die Änderung gilt ab der nächsten Shell. Danach:
 
 ```bash
 rsync-tui doctor

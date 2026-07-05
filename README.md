@@ -51,9 +51,11 @@ less install.sh
 sh install.sh
 ```
 
-The default destination is `~/.local/bin/rsync-tui`. Override it with
-`INSTALL_DIR`, select a release with `VERSION`, or skip the user update timer
-with `NO_SYSTEMD=1`.
+The default destination is `/usr/local/bin/rsync-tui` when the installer runs
+as root and `~/.local/bin/rsync-tui` otherwise. If the user-local directory is
+not already on `PATH`, the installer adds it to `~/.profile`; open a new shell
+to activate it. Override the destination with `INSTALL_DIR`, select a release
+with `VERSION`, or skip the user update timer with `NO_SYSTEMD=1`.
 
 Manual installation:
 
