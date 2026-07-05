@@ -1,54 +1,192 @@
-# rsync-srv-gui
+# rsync-tui
 
-`rsync-srv-gui` is a small Bash tool with a Whiptail-based menu interface for using `rsync` safely and conveniently on systems with `/srv`-based storage mounts.
+[![CI](https://github.com/fabianschmeltzer/rsync-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/fabianschmeltzer/rsync-tui/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The tool is especially useful for Raspberry Pi, OpenMediaVault, USB storage, and homelab setups where data needs to be copied, moved, mirrored, or tested between mounted drives, backup targets, or service directories.
+`rsync-tui` is a modern, bilingual terminal interface for safe local and SSH
+file transfers with `rsync`. It is designed for Raspberry Pi,
+OpenMediaVault, Debian/Ubuntu servers, removable storage and homelabs that are
+often administered through SSH.
 
-## Features
+> `v0.1.0` is a beta release. Always inspect the command and use the preselected
+> dry-run before destructive Mirror or Move operations.
 
-* Folder selection via menu starting from `/srv`
-* Copy new and updated files
-* Move files and remove empty source folders afterward
-* Mirror synchronization from source to destination
-* Dry-run mode without making changes
-* Progress display using `rsync --info=progress2`
-* Safety check against identical source and destination paths
-* Safety check against selecting a destination inside the source path
-* Final overview and confirmation before execution
+[Deutsche Dokumentation](README.de.md)
 
-## Modes
+![rsync-tui dashboard](docs/assets/rsync-tui-preview.svg)
 
-| Mode | Description                                                                          |
-| ---- | ------------------------------------------------------------------------------------ |
-| Copy | Transfers new and updated files                                                      |
-| Move | Transfers files and removes them from the source afterward                           |
-| Sync | Mirrors the source to the destination and deletes differing files in the destination |
-| Test | Performs a dry run without making changes                                            |
+## Highlights
 
-## Target audience
-
-This script is intended for Linux systems where multiple drives or data directories are mounted under `/srv`, for example:
-
-* Raspberry Pi servers
-* OpenMediaVault systems
-* USB HDD/SSD setups
-* Backup and restore scenarios
-* Docker or homelab storage structures
+- Responsive Bubble Tea interface with keyboard and mouse support
+- English and German UI with automatic locale detection
+- Local directory browser for `/`, home, `/srv`, `/mnt`, `/media` and detected mounts
+- SSH push/pull, native OpenSSH authentication and remote directory browser
+- Copy, Mirror, Move, Snapshot, Restore and Custom modes
+- Complete command preview; rsync is executed with argument arrays, never `sh -c`
+- Guided advanced options plus validated expert arguments
+- XDG-compliant TOML profiles and transfer history
+- `--link-dest` snapshots with Last-N or GFS retention
+- systemd user/system timers and unattended safety limits
+- ntfy, Gotify, webhook, Sendmail and SMTP/TLS notifications
+- Signed, automatic GitHub Release updates with atomic rollback
 
 ## Requirements
 
-* Linux
-* Bash
-* rsync
-* whiptail
+- Linux on amd64, arm64 or armv7
+- rsync 3.1.0 or newer
+- OpenSSH client for remote transfers
+- systemd only when schedules or the background update timer are used
+- `sudo` only for profiles that explicitly request elevated access
 
-Install dependencies on Debian, Ubuntu, or Raspberry Pi OS:
+The application itself is shipped as a static Go binary. rsync and OpenSSH are
+not bundled.
+
+## Installation
+
+Download and inspect the installer, then run it:
 
 ```bash
-sudo apt update
-sudo apt install rsync whiptail
+curl -fLO https://raw.githubusercontent.com/fabianschmeltzer/rsync-tui/main/install.sh
+less install.sh
+sh install.sh
 ```
 
-## Warning
+The default destination is `~/.local/bin/rsync-tui`. Override it with
+`INSTALL_DIR`, select a release with `VERSION`, or skip the user update timer
+with `NO_SYSTEMD=1`.
 
-Sync mode uses `rsync --delete`. This makes the destination match the source exactly. Files that exist only in the destination may be deleted. The script therefore shows a final summary and asks for confirmation before execution.
+Manual installation:
+
+```bash
+curl -fLO https://github.com/fabianschmeltzer/rsync-tui/releases/download/v0.1.0/rsync-tui_linux_amd64.tar.gz
+curl -fLO https://github.com/fabianschmeltzer/rsync-tui/releases/download/v0.1.0/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf rsync-tui_linux_amd64.tar.gz
+install -m 0755 rsync-tui ~/.local/bin/rsync-tui
+```
+
+Run diagnostics after installation:
+
+```bash
+rsync-tui doctor
+rsync-tui
+```
+
+## Usage
+
+The interactive wizard accepts local paths and SSH endpoints:
+
+```text
+/srv/dev-disk-by-uuid-.../photos
+backup@example.net:/srv/backups/photos
+ssh://backup@example.net:2222/srv/backups/photos
+```
+
+Press `Ctrl+B` in a source or destination field to open the local or remote
+directory browser. The source semantics are explicit:
+
+- **contents** adds a trailing slash and copies the directory contents;
+- **directory** copies the directory as a child of the destination.
+
+Public commands:
+
+```text
+rsync-tui
+rsync-tui run --profile <id|name> [--dry-run] [--scheduled]
+rsync-tui profile list|show|configure
+rsync-tui notify test --profile <id|name>
+rsync-tui snapshot list --profile <id|name>
+rsync-tui snapshot restore --profile <id|name> --snapshot <id>
+rsync-tui doctor [--json]
+rsync-tui schedule install --profile <id|name>
+rsync-tui update [--check|--rollback]
+rsync-tui version [--json]
+```
+
+Profiles are stored in `~/.config/rsync-tui/profiles/`; logs and history are
+stored below `~/.local/state/rsync-tui/`. Secret-bearing files are created with
+mode `0600` on Linux.
+
+Example schedule and notification configuration:
+
+```bash
+rsync-tui profile configure --profile Nightly \
+  --schedule 'daily' \
+  --retention gfs --daily 7 --weekly 4 --monthly 12 \
+  --webhook-url 'https://example.invalid/hook' \
+  --notify-success=true --notify-failure=true
+rsync-tui schedule install --profile Nightly
+rsync-tui notify test --profile Nightly
+```
+
+Notification tokens and SMTP passwords should be referenced through
+`--ntfy-token-env`, `--ntfy-token-file`, `--gotify-token-env`,
+`--gotify-token-file`, `--smtp-password-env` or `--smtp-password-file`; avoid
+placing credentials directly in shell history.
+
+## Safety model
+
+- Identical and unsafe overlapping local paths are rejected.
+- Mirror and Move default to dry-run. Bypassing it requires two confirmations.
+- Scheduled destructive jobs require an explicit profile authorization,
+  mandatory preview and numeric deletion/removal limits.
+- Scheduled Move freezes a NUL-delimited local source manifest before preview.
+- Scheduled SSH profiles require non-interactive key authentication.
+- Passwords and private keys stay with OpenSSH and are never stored by this app.
+- Snapshot pruning runs only after a successful new snapshot and always keeps
+  at least the newest successful backup.
+- rsync internal/server/daemon options and remote-to-remote copies are rejected.
+
+Snapshot restores are dry-runs by default. A real restore additionally requires
+`--execute --yes`.
+
+## Snapshot layout
+
+Managed snapshots are stored below:
+
+```text
+DESTINATION/.rsync-tui/PROFILE_ID/
+├── latest -> snapshots/20260704T190000Z
+└── snapshots/
+    ├── 20260703T190000Z/
+    └── 20260704T190000Z/
+```
+
+The default keeps the last ten successful snapshots. GFS retention can instead
+keep seven daily, four weekly and twelve monthly snapshots.
+
+## Building and testing
+
+Go 1.25 or newer is required:
+
+```bash
+go test ./...
+go vet ./...
+go build -o bin/rsync-tui ./cmd/rsync-tui
+```
+
+Release tags trigger static builds for Linux amd64, arm64 and armv7. Release
+manifests are Ed25519-signed and accompanied by SHA-256 sums, an SBOM and
+GitHub build provenance.
+
+## Limitations of v0.1.0
+
+- Linux only
+- no rsync daemon configuration
+- no bidirectional synchronization
+- no remote-to-remote transfer
+- scheduled remote Move requires an interactive review
+- SSH passwords are available only for interactive runs
+
+The original Whiptail Bash script remains in [`legacy/`](legacy/) as an
+unsupported reference.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as
+described in [SECURITY.md](SECURITY.md); do not include credentials or
+unredacted endpoint URLs in issues.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
