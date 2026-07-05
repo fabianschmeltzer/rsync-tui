@@ -3,9 +3,9 @@
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and
 Semantic Versioning.
 
-## [Unreleased]
+## [Unreleased][]
 
-## [0.1.0] - 2026-07-04
+## [0.1.0][] - 2026-07-04
 
 ### Added
 
