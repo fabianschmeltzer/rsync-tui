@@ -4,7 +4,7 @@
 lokale und SSH-Übertragungen mit `rsync`. Sie richtet sich besonders an
 Raspberry Pi, OpenMediaVault, Debian-/Ubuntu-Server, USB-Speicher und Homelabs.
 
-> `v0.1.0` ist eine Beta. Vor Mirror- oder Move-Vorgängen immer den angezeigten
+> `v0.1.1` ist eine Beta. Vor Mirror- oder Move-Vorgängen immer den angezeigten
 > Befehl prüfen und den vorausgewählten Trockenlauf verwenden.
 
 [English documentation](README.md)
@@ -47,7 +47,10 @@ sh install.sh
 Als Root installiert das Skript standardmäßig nach
 `/usr/local/bin/rsync-tui`, sonst nach `~/.local/bin/rsync-tui`. Falls das
 Benutzerverzeichnis noch nicht im `PATH` steht, ergänzt das Skript
-`~/.profile`; die Änderung gilt ab der nächsten Shell. Danach:
+`~/.profile`; die Änderung gilt ab der nächsten Shell. Standardmäßig wird die
+neueste veröffentlichte Version einschließlich Vorabversionen installiert.
+Eine bestimmte Version kann weiterhin mit `VERSION=v0.1.1 sh install.sh`
+ausgewählt werden. Danach:
 
 ```bash
 rsync-tui doctor
@@ -110,7 +113,7 @@ go vet ./...
 go build -o bin/rsync-tui ./cmd/rsync-tui
 ```
 
-Nicht Bestandteil von `v0.1.0` sind rsync-Daemonverwaltung,
+Nicht Bestandteil von `v0.1.1` sind rsync-Daemonverwaltung,
 bidirektionale Synchronisation, Remote-zu-Remote und Windows/macOS.
 
 Das frühere Whiptail-Skript liegt als nicht mehr unterstützte Referenz unter

@@ -2,7 +2,7 @@
 set -eu
 
 REPOSITORY="fabianschmeltzer/rsync-tui"
-VERSION="${VERSION:-v0.1.0}"
+VERSION="${VERSION:-latest}"
 NO_SYSTEMD="${NO_SYSTEMD:-0}"
 DEFAULT_INSTALL_DIR=0
 
@@ -40,6 +40,29 @@ command -v curl >/dev/null 2>&1 || {
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+
+if [ "$VERSION" = "latest" ]; then
+    RELEASES_URL="https://api.github.com/repos/${REPOSITORY}/releases?per_page=1"
+    curl --fail --silent --show-error --location \
+        --proto '=https' --tlsv1.2 \
+        --header 'Accept: application/vnd.github+json' \
+        --header 'X-GitHub-Api-Version: 2022-11-28' \
+        --user-agent 'rsync-tui-installer' \
+        --output "$TMP_DIR/releases.json" "$RELEASES_URL"
+    VERSION="$(
+        sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$TMP_DIR/releases.json" | head -n 1
+    )"
+    [ -n "$VERSION" ] || {
+        echo "Could not determine the latest rsync-tui release." >&2
+        exit 1
+    }
+fi
+
+printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
+    echo "Invalid release version: $VERSION" >&2
+    exit 1
+}
 
 ARCHIVE="rsync-tui_linux_${TARGET}.tar.gz"
 BASE_URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}"

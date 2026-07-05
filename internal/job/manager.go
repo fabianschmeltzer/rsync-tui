@@ -112,7 +112,7 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 	var manifest string
 	if options.Scheduled && profile.Mode == domain.ModeMove {
 		if profile.Source.IsRemote() {
-			return outcome, errors.New("scheduled remote Move requires an interactive review in v0.1.0")
+			return outcome, errors.New("scheduled remote Move requires an interactive review")
 		}
 		var err error
 		manifest, err = freezeLocalSource(m.Store.Paths.StateDir, profile)

@@ -34,6 +34,7 @@ const (
 	screenRunning
 	screenResult
 	screenInfo
+	screenSettings
 	screenBrowser
 )
 
@@ -66,6 +67,7 @@ type Model struct {
 	height           int
 	screen           screen
 	cursor           int
+	settingsCursor   int
 	status           string
 	input            textinput.Model
 	wizardStep       int
@@ -108,6 +110,8 @@ var (
 func New(store *config.Store, settings config.Settings, version string) Model {
 	if settings.Theme == "no-color" || os.Getenv("NO_COLOR") != "" {
 		disableColors()
+	} else {
+		enableColors()
 	}
 	input := textinput.New()
 	input.Prompt = "› "
@@ -136,6 +140,17 @@ func disableColors() {
 	warningStyle = lipgloss.NewStyle()
 	errorStyle = lipgloss.NewStyle()
 	successStyle = lipgloss.NewStyle()
+}
+
+func enableColors() {
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C9DFF"))
+	subtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Background(lipgloss.Color("#3151A4")).Padding(0, 1)
+	itemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Padding(0, 1)
+	panelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#475569")).Padding(1, 2)
+	warningStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B"))
+	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#EF4444"))
+	successStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#22C55E"))
 }
 
 func (m Model) Init() tea.Cmd {
@@ -257,6 +272,8 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = ""
 			m.cursor = 0
 		}
+	case screenSettings:
+		return m.handleSettings(value)
 	case screenBrowser:
 		return m.handleBrowser(value)
 	}
@@ -271,10 +288,12 @@ func (m Model) handleHome(key string) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.cursor = (m.cursor + 1) % len(items)
 	case "l":
-		m.translator.Toggle()
-		m.settings.Language = m.translator.Language
-		_ = m.store.SaveSettings(m.settings)
-		m.status = m.translator.T("status.language")
+		next := m.settings
+		next.Language = toggledLanguage(m.translator.Language)
+		m = m.saveSettings(next)
+		if m.settings.Language == next.Language {
+			m.status = m.translator.T("status.language")
+		}
 	case "q":
 		return m, tea.Quit
 	case "enter":
@@ -293,14 +312,96 @@ func (m Model) handleHome(key string) (tea.Model, tea.Cmd) {
 		case 4:
 			m.showHistory()
 		case 5:
-			m.screen = screenInfo
-			m.status = fmt.Sprintf("Language: %s\nAuto update: %t\nChannel: %s\nConfig: %s",
-				m.translator.Language, m.settings.AutoUpdate, m.settings.UpdateChannel, m.store.Paths.ConfigDir)
+			m.screen = screenSettings
+			m.settingsCursor = 0
+			m.status = ""
 		case 6:
 			return m, tea.Quit
 		}
 	}
 	return m, nil
+}
+
+func (m Model) handleSettings(key string) (tea.Model, tea.Cmd) {
+	const settingsCount = 5
+	switch key {
+	case "esc", "q":
+		m.screen = screenHome
+		m.status = ""
+	case "up", "k":
+		m.settingsCursor = (m.settingsCursor - 1 + settingsCount) % settingsCount
+	case "down", "j":
+		m.settingsCursor = (m.settingsCursor + 1) % settingsCount
+	case "left", "h":
+		m = m.changeSetting(-1)
+	case "right", "l", "space", "enter":
+		m = m.changeSetting(1)
+	}
+	return m, nil
+}
+
+func (m Model) changeSetting(direction int) Model {
+	next := m.settings
+	switch m.settingsCursor {
+	case 0:
+		next.Language = cycleSetting(next.Language, []string{"auto", "de", "en"}, direction)
+	case 1:
+		next.Theme = cycleSetting(next.Theme, []string{"auto", "no-color"}, direction)
+	case 2:
+		next.AutoUpdate = !next.AutoUpdate
+	case 3:
+		next.UpdateChannel = cycleSetting(next.UpdateChannel, []string{"stable", "beta"}, direction)
+	case 4:
+		next.CheckHours = cycleIntSetting(next.CheckHours, []int{1, 6, 12, 24, 168}, direction)
+	}
+	return m.saveSettings(next)
+}
+
+func (m Model) saveSettings(next config.Settings) Model {
+	if err := m.store.SaveSettings(next); err != nil {
+		m.status = m.translator.T("settings.save_error", err)
+		return m
+	}
+	m.settings = next
+	m.translator = i18n.New(next.Language)
+	if next.Theme == "no-color" || os.Getenv("NO_COLOR") != "" {
+		disableColors()
+	} else {
+		enableColors()
+	}
+	m.status = m.translator.T("settings.saved")
+	return m
+}
+
+func toggledLanguage(language string) string {
+	if language == "de" {
+		return "en"
+	}
+	return "de"
+}
+
+func cycleSetting(current string, options []string, direction int) string {
+	index := 0
+	for candidateIndex, option := range options {
+		if option == current {
+			index = candidateIndex
+			break
+		}
+	}
+	index = (index + direction + len(options)) % len(options)
+	return options[index]
+}
+
+func cycleIntSetting(current int, options []int, direction int) int {
+	index := 0
+	for candidateIndex, option := range options {
+		if option == current {
+			index = candidateIndex
+			break
+		}
+	}
+	index = (index + direction + len(options)) % len(options)
+	return options[index]
 }
 
 func (m *Model) startWizard() {
@@ -593,6 +694,8 @@ func (m Model) render() string {
 		body = m.renderResult()
 	case screenInfo:
 		body = m.status + "\n\nEnter/Esc — back"
+	case screenSettings:
+		body = m.renderSettings()
 	case screenBrowser:
 		body = m.renderBrowser()
 	}
@@ -614,6 +717,47 @@ func (m Model) renderHome() string {
 	}
 	lines = append(lines, "", subtitleStyle.Render(m.translator.T("help.navigation")))
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderSettings() string {
+	values := []string{
+		m.languageSettingLabel(),
+		m.translator.T("settings.theme." + m.settings.Theme),
+		m.translator.T(fmt.Sprintf("settings.bool.%t", m.settings.AutoUpdate)),
+		m.translator.T("settings.channel." + m.settings.UpdateChannel),
+		m.translator.T("settings.hours", m.settings.CheckHours),
+	}
+	labels := []string{
+		m.translator.T("settings.language"),
+		m.translator.T("settings.theme"),
+		m.translator.T("settings.auto_update"),
+		m.translator.T("settings.update_channel"),
+		m.translator.T("settings.check_hours"),
+	}
+	lines := make([]string, 0, len(labels))
+	for index, label := range labels {
+		line := fmt.Sprintf("%-22s %s", label+":", values[index])
+		if index == m.settingsCursor {
+			lines = append(lines, selectedStyle.Render("› "+line))
+		} else {
+			lines = append(lines, itemStyle.Render("  "+line))
+		}
+	}
+	body := titleStyle.Render(m.translator.T("settings.title")) + "\n\n" +
+		strings.Join(lines, "\n") + "\n\n" +
+		subtitleStyle.Render(m.translator.T("settings.config", m.store.Paths.ConfigDir)) + "\n" +
+		subtitleStyle.Render(m.translator.T("settings.help"))
+	if m.status != "" {
+		body += "\n\n" + renderStatus(m.status)
+	}
+	return body
+}
+
+func (m Model) languageSettingLabel() string {
+	if m.settings.Language == "auto" {
+		return m.translator.T("settings.language.auto", m.translator.T("settings.language."+m.translator.Language))
+	}
+	return m.translator.T("settings.language." + m.settings.Language)
 }
 
 func (m Model) renderWizard() string {

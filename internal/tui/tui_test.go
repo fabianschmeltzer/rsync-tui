@@ -49,6 +49,54 @@ func TestNoColorTheme(t *testing.T) {
 	}
 }
 
+func TestSettingsCanBeChangedAndPersisted(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	store, err := config.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := New(store, config.DefaultSettings(), "0.1.0")
+	model.cursor = 5
+	updated, _ := model.handleHome("enter")
+	model = updated.(Model)
+	if model.screen != screenSettings {
+		t.Fatalf("settings menu opened screen %d", model.screen)
+	}
+
+	updated, _ = model.handleSettings("right")
+	model = updated.(Model)
+	if model.settings.Language != "de" || model.translator.Language != "de" {
+		t.Fatalf("language was not changed: %+v", model.settings)
+	}
+	if rendered := stripANSI(model.renderSettings()); !strings.Contains(rendered, "Automatische Updates") {
+		t.Fatalf("settings did not switch to German: %s", rendered)
+	}
+
+	model.settingsCursor = 1
+	model = model.changeSetting(1)
+	model.settingsCursor = 2
+	model = model.changeSetting(1)
+	model.settingsCursor = 3
+	model = model.changeSetting(1)
+	model.settingsCursor = 4
+	model = model.changeSetting(1)
+
+	persisted, err := store.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Language != "de" ||
+		persisted.Theme != "no-color" ||
+		persisted.AutoUpdate ||
+		persisted.UpdateChannel != "stable" ||
+		persisted.CheckHours != 168 {
+		t.Fatalf("settings were not persisted: %+v", persisted)
+	}
+}
+
 func TestParseEndpoints(t *testing.T) {
 	remote, err := parseEndpoint("ssh://alice@example.test:2222/archive")
 	if err != nil {

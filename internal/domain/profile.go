@@ -220,6 +220,7 @@ func NewProfile(name string) Profile {
 		Source:          Endpoint{Kind: EndpointLocal},
 		Destination:     Endpoint{Kind: EndpointLocal},
 		SourceSemantics: CopyContents,
+		RemoveEmptyDirs: true,
 		DryRunByDefault: true,
 		Snapshot:        SnapshotConfig{Retention: DefaultRetention()},
 		CreatedAt:       now,

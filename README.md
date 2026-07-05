@@ -8,7 +8,7 @@ file transfers with `rsync`. It is designed for Raspberry Pi,
 OpenMediaVault, Debian/Ubuntu servers, removable storage and homelabs that are
 often administered through SSH.
 
-> `v0.1.0` is a beta release. Always inspect the command and use the preselected
+> `v0.1.1` is a beta release. Always inspect the command and use the preselected
 > dry-run before destructive Mirror or Move operations.
 
 [Deutsche Dokumentation](README.de.md)
@@ -55,13 +55,17 @@ The default destination is `/usr/local/bin/rsync-tui` when the installer runs
 as root and `~/.local/bin/rsync-tui` otherwise. If the user-local directory is
 not already on `PATH`, the installer adds it to `~/.profile`; open a new shell
 to activate it. Override the destination with `INSTALL_DIR`, select a release
-with `VERSION`, or skip the user update timer with `NO_SYSTEMD=1`.
+with `VERSION`, or skip the user update timer with `NO_SYSTEMD=1`. By default,
+the installer resolves the newest published release, including prereleases.
 
 Manual installation:
 
 ```bash
-curl -fLO https://github.com/fabianschmeltzer/rsync-tui/releases/download/v0.1.0/rsync-tui_linux_amd64.tar.gz
-curl -fLO https://github.com/fabianschmeltzer/rsync-tui/releases/download/v0.1.0/SHA256SUMS
+VERSION="$(curl -fsSL 'https://api.github.com/repos/fabianschmeltzer/rsync-tui/releases?per_page=1' \
+  | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | head -n 1)"
+curl -fLO "https://github.com/fabianschmeltzer/rsync-tui/releases/download/${VERSION}/rsync-tui_linux_amd64.tar.gz"
+curl -fLO "https://github.com/fabianschmeltzer/rsync-tui/releases/download/${VERSION}/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf rsync-tui_linux_amd64.tar.gz
 install -m 0755 rsync-tui ~/.local/bin/rsync-tui
@@ -171,7 +175,7 @@ Release tags trigger static builds for Linux amd64, arm64 and armv7. Release
 manifests are Ed25519-signed and accompanied by SHA-256 sums, an SBOM and
 GitHub build provenance.
 
-## Limitations of v0.1.0
+## Limitations of v0.1.1
 
 - Linux only
 - no rsync daemon configuration

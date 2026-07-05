@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,15 +110,15 @@ func (r Runner) Run(ctx context.Context, profile domain.Profile, options RunOpti
 	waitErr := process.Wait()
 	wg.Wait()
 
+	if waitErr == nil && profile.Mode == domain.ModeMove && !options.DryRun {
+		waitErr = removeEmptySourceDirectories(ctx, profile, options)
+	}
 	result.FinishedAt = time.Now().UTC()
 	result.ExitCode = exitCode(waitErr)
 	if waitErr != nil {
 		result.Error = waitErr.Error()
 	}
 	r.writeHistory(result)
-	if waitErr == nil && profile.Mode == domain.ModeMove && profile.RemoveEmptyDirs && !profile.Source.IsRemote() && !options.DryRun {
-		removeEmptyDirectories(profile.Source.Path)
-	}
 	return result, waitErr
 }
 
@@ -230,21 +231,76 @@ func (l *fileLock) Release() {
 	}
 }
 
-func removeEmptyDirectories(root string) {
-	type entry struct {
-		path  string
-		depth int
+func removeEmptySourceDirectories(ctx context.Context, profile domain.Profile, options RunOptions) error {
+	if profile.Source.IsRemote() {
+		return removeRemoteEmptyDirectories(ctx, profile.Source, options.Build.SSHControlPath)
 	}
-	var directories []entry
-	_ = filepath.WalkDir(root, func(path string, item os.DirEntry, err error) error {
-		if err == nil && item.IsDir() && path != root {
-			directories = append(directories, entry{path: path, depth: strings.Count(filepath.Clean(path), string(filepath.Separator))})
+	if profile.UseSudo {
+		return removeEmptyDirectoriesWithSudo(ctx, profile.Source.Path, options.Scheduled)
+	}
+	return removeEmptyDirectories(profile.Source.Path)
+}
+
+func removeEmptyDirectories(root string) error {
+	var directories []string
+	if err := filepath.WalkDir(root, func(path string, item os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if item.IsDir() && path != root {
+			directories = append(directories, path)
 		}
 		return nil
-	})
-	for index := len(directories) - 1; index >= 0; index-- {
-		_ = os.Remove(directories[index].path)
+	}); err != nil {
+		return fmt.Errorf("inspect source directories: %w", err)
 	}
+	for index := len(directories) - 1; index >= 0; index-- {
+		path := directories[index]
+		entries, err := os.ReadDir(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect source directory %s: %w", path, err)
+		}
+		if len(entries) != 0 {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove empty source directory %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func removeEmptyDirectoriesWithSudo(ctx context.Context, root string, nonInteractive bool) error {
+	args := make([]string, 0, 10)
+	if nonInteractive {
+		args = append(args, "-n")
+	}
+	args = append(args, "find", "--", root, "-depth", "-mindepth", "1", "-type", "d", "-empty", "-delete")
+	output, err := exec.CommandContext(ctx, "sudo", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("remove empty source directories with sudo: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func removeRemoteEmptyDirectories(ctx context.Context, source domain.Endpoint, controlPath string) error {
+	args := []string{"-o", "BatchMode=yes"}
+	if controlPath != "" {
+		args = append(args, "-o", "ControlPath="+controlPath)
+	}
+	if source.Port > 0 {
+		args = append(args, "-p", strconv.Itoa(source.Port))
+	}
+	command := "find -- " + shellQuote(source.Path) + " -depth -mindepth 1 -type d -empty -delete"
+	args = append(args, source.SSHHost(), command)
+	output, err := exec.CommandContext(ctx, "ssh", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("remove empty remote source directories: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func RuntimePlatform() string {

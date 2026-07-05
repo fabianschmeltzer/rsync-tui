@@ -11,6 +11,9 @@ func validProfile() Profile {
 
 func TestProfileValidation(t *testing.T) {
 	profile := validProfile()
+	if !profile.RemoveEmptyDirs {
+		t.Fatal("new profiles must remove empty directories after a move")
+	}
 	if err := profile.Validate(); err != nil {
 		t.Fatalf("valid profile rejected: %v", err)
 	}
