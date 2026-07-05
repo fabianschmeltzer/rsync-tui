@@ -25,6 +25,7 @@ type Options struct {
 	OnEvent        func(rsyncengine.Event)
 	Version        string
 	SSHControlPath string
+	AdHoc          bool
 }
 
 type Outcome struct {
@@ -129,6 +130,7 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 			Scheduled: true,
 			Build:     build,
 			OnEvent:   onEvent,
+			AdHoc:     options.AdHoc,
 		})
 		outcome.Preview = &preview
 		if err != nil {
@@ -151,6 +153,7 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 		Scheduled: options.Scheduled,
 		Build:     build,
 		OnEvent:   onEvent,
+		AdHoc:     options.AdHoc,
 	})
 	outcome.Result = result
 
@@ -198,6 +201,7 @@ func (m Manager) verifySnapshot(ctx context.Context, profile domain.Profile, opt
 			DestinationOverride: snapshotPath,
 			SSHControlPath:      options.SSHControlPath,
 		},
+		AdHoc: options.AdHoc,
 		OnEvent: func(event rsyncengine.Event) {
 			if isChangedLine(strings.TrimSpace(event.Message)) || strings.HasPrefix(strings.TrimSpace(event.Message), "*deleting") {
 				changed.Add(1)

@@ -8,7 +8,7 @@ file transfers with `rsync`. It is designed for Raspberry Pi,
 OpenMediaVault, Debian/Ubuntu servers, removable storage and homelabs that are
 often administered through SSH.
 
-> `v0.1.1` is a beta release. Always inspect the command and use the preselected
+> `v0.1.2` is a beta release. Always inspect the command and use the preselected
 > dry-run before destructive Mirror or Move operations.
 
 [Deutsche Dokumentation](README.de.md)
@@ -22,9 +22,10 @@ often administered through SSH.
 - Local directory browser for `/`, home, `/srv`, `/mnt`, `/media` and detected mounts
 - SSH push/pull, native OpenSSH authentication and remote directory browser
 - Copy, Mirror, Move, Snapshot, Restore and Custom modes
+- One-time TUI and CLI transfers without creating a profile
 - Complete command preview; rsync is executed with argument arrays, never `sh -c`
 - Guided advanced options plus validated expert arguments
-- XDG-compliant TOML profiles and transfer history
+- XDG-compliant TOML profiles and a navigable transfer history
 - `--link-dest` snapshots with Last-N or GFS retention
 - systemd user/system timers and unattended safety limits
 - ntfy, Gotify, webhook, Sendmail and SMTP/TLS notifications
@@ -99,6 +100,7 @@ Public commands:
 ```text
 rsync-tui
 rsync-tui run --profile <id|name> [--dry-run] [--scheduled]
+rsync-tui run --source <path> --destination <path> [--mode copy|mirror|move]
 rsync-tui profile list|show|configure
 rsync-tui notify test --profile <id|name>
 rsync-tui snapshot list --profile <id|name>
@@ -109,9 +111,17 @@ rsync-tui update [--check|--rollback]
 rsync-tui version [--json]
 ```
 
+For a one-time CLI transfer, `--name` is optional and
+`--source-semantics contents|directory` controls the trailing-slash behavior.
+One-time Mirror and Move commands are dry-runs unless both `--execute` and
+`--yes` are supplied. Direct transfers cannot be scheduled.
+
 Profiles are stored in `~/.config/rsync-tui/profiles/`; logs and history are
 stored below `~/.local/state/rsync-tui/`. Secret-bearing files are created with
 mode `0600` on Linux.
+
+The update check interval in Settings includes **Every start**. It applies only
+when launching the TUI and remains disabled when automatic updates are off.
 
 Example schedule and notification configuration:
 
@@ -175,7 +185,7 @@ Release tags trigger static builds for Linux amd64, arm64 and armv7. Release
 manifests are Ed25519-signed and accompanied by SHA-256 sums, an SBOM and
 GitHub build provenance.
 
-## Limitations of v0.1.1
+## Limitations of v0.1.2
 
 - Linux only
 - no rsync daemon configuration

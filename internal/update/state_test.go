@@ -17,6 +17,9 @@ func TestUpdateCheckInterval(t *testing.T) {
 	if Due(directory, 24*time.Hour, now.Add(time.Hour)) {
 		t.Fatal("recent update check should not be due")
 	}
+	if !Due(directory, 0, now) {
+		t.Fatal("every-start interval should always be due")
+	}
 	if !Due(directory, 24*time.Hour, now.Add(25*time.Hour)) {
 		t.Fatal("old update check should be due")
 	}

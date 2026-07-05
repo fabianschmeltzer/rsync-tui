@@ -101,6 +101,9 @@ func (s *Store) LoadSettings() (Settings, error) {
 	if settings.SchemaVersion != 1 {
 		return Settings{}, fmt.Errorf("unsupported settings schema %d", settings.SchemaVersion)
 	}
+	if settings.CheckHours < 0 {
+		settings.CheckHours = DefaultSettings().CheckHours
+	}
 	return settings, nil
 }
 

@@ -22,7 +22,7 @@ rotation release; publishing it compromises automatic updates.
 
 1. Ensure CI passes on `main`.
 2. Update `CHANGELOG.md`.
-3. Create and push an annotated tag such as `v0.1.1`.
+3. Create and push an annotated tag such as `v0.1.2`.
 4. Confirm that the release workflow publishes:
    - amd64, arm64 and armv7 archives;
    - `SHA256SUMS`;

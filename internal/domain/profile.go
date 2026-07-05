@@ -23,6 +23,8 @@ const (
 	ModeCustom   Mode = "custom"
 )
 
+const DefaultAdHocName = "One-time transfer"
+
 type EndpointKind string
 
 const (

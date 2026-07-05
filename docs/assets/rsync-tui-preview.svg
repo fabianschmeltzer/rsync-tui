@@ -10,7 +10,7 @@
   <line x1="0" y1="52" x2="960" y2="52" stroke="#334155"/>
 
   <text x="55" y="94" fill="#7c9dff" font-family="monospace" font-size="28" font-weight="700">rsync-tui</text>
-  <text x="220" y="94" fill="#94a3b8" font-family="monospace" font-size="16">v0.1.1</text>
+  <text x="220" y="94" fill="#94a3b8" font-family="monospace" font-size="16">v0.1.2</text>
   <text x="55" y="124" fill="#94a3b8" font-family="monospace" font-size="16">Safe local and SSH transfers powered by rsync</text>
 
   <rect x="50" y="152" width="860" height="336" rx="12" fill="#111c32" stroke="#475569" stroke-width="2"/>

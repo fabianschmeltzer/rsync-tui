@@ -4,8 +4,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fabianschmeltzer/rsync-tui/internal/config"
+	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
+	rsyncengine "github.com/fabianschmeltzer/rsync-tui/internal/rsync"
 )
 
 func TestHomeRendersInBothLanguages(t *testing.T) {
@@ -95,15 +98,148 @@ func TestSettingsCanBeChangedAndPersisted(t *testing.T) {
 		persisted.CheckHours != 168 {
 		t.Fatalf("settings were not persisted: %+v", persisted)
 	}
-}
 
-func TestParseEndpoints(t *testing.T) {
-	remote, err := parseEndpoint("ssh://alice@example.test:2222/archive")
+	model = model.changeSetting(1)
+	if model.settings.CheckHours != 0 {
+		t.Fatalf("every-start interval was not selected: %+v", model.settings)
+	}
+	if rendered := stripANSI(model.renderSettings()); !strings.Contains(rendered, "Jeden Start") {
+		t.Fatalf("every-start interval was not rendered: %s", rendered)
+	}
+	persisted, err = store.LoadSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if remote.User != "alice" || remote.Host != "example.test" || remote.Port != 2222 || remote.Path != "/archive" {
-		t.Fatalf("unexpected SSH endpoint: %+v", remote)
+	if persisted.CheckHours != 0 {
+		t.Fatalf("every-start interval was not persisted: %+v", persisted)
+	}
+}
+
+func TestWizardSupportsOneTimeAndSavedTransfers(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	store, err := config.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := New(store, config.DefaultSettings(), "0.1.2")
+	model.startWizard()
+	if model.wizardStage != wizardChooseStorage || model.saveProfile {
+		t.Fatalf("wizard did not default to a one-time transfer: %+v", model)
+	}
+	updated, _ := model.handleWizard("enter")
+	model = updated.(Model)
+	if model.wizardStage != wizardName || model.saveProfile {
+		t.Fatalf("one-time selection did not open optional name: %+v", model)
+	}
+	model.input.SetValue("")
+	updated, _ = model.handleWizard("enter")
+	model = updated.(Model)
+	if model.wizardStage != wizardSource || model.draft.Name != domain.DefaultAdHocName {
+		t.Fatalf("optional one-time name was not accepted: %+v", model)
+	}
+	if containsMode(wizardModes(false), domain.ModeSnapshot) {
+		t.Fatal("snapshot mode is visible for a one-time transfer")
+	}
+	if err := model.persistWizardProfile(); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("one-time transfer created profiles: %+v", profiles)
+	}
+
+	saved := New(store, config.DefaultSettings(), "0.1.2")
+	saved.startWizard()
+	saved.profileChoice = 1
+	updated, _ = saved.handleWizard("enter")
+	saved = updated.(Model)
+	saved.input.SetValue("")
+	updated, _ = saved.handleWizard("enter")
+	saved = updated.(Model)
+	if saved.wizardStage != wizardName || saved.status == "" {
+		t.Fatal("saved profile accepted an empty name")
+	}
+	saved.input.SetValue("Saved transfer")
+	updated, _ = saved.handleWizard("enter")
+	saved = updated.(Model)
+	saved.draft.Source.Path = "/source"
+	saved.draft.Destination.Path = "/destination"
+	if err := saved.persistWizardProfile(); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err = store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 1 || profiles[0].Name != "Saved transfer" {
+		t.Fatalf("saved transfer did not create a profile: %+v", profiles)
+	}
+	if !containsMode(wizardModes(true), domain.ModeSnapshot) {
+		t.Fatal("snapshot mode is missing for a saved profile")
+	}
+}
+
+func TestWizardBackNavigationReturnsToStorageChoice(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	store, err := config.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := New(store, config.DefaultSettings(), "0.1.2")
+	model.startWizard()
+	updated, _ := model.handleWizard("enter")
+	model = updated.(Model)
+	updated, _ = model.handleWizard("esc")
+	model = updated.(Model)
+	if model.wizardStage != wizardChooseStorage {
+		t.Fatalf("Esc returned to stage %d", model.wizardStage)
+	}
+}
+
+func TestHistoryRendersReadableListAndDetails(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	store, err := config.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := New(store, config.DefaultSettings(), "0.1.2")
+	model.width, model.height = 100, 30
+	model.history = []rsyncengine.Result{{
+		ProfileName: domain.DefaultAdHocName,
+		Mode:        domain.ModeCopy,
+		Source:      "/source",
+		Destination: "/destination",
+		AdHoc:       true,
+		StartedAt:   time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC),
+		FinishedAt:  time.Date(2026, 7, 5, 12, 0, 2, 0, time.UTC),
+		Command:     "rsync --archive -- /source/ /destination",
+		ExitCode:    0,
+	}}
+	rendered := stripANSI(model.renderHistory())
+	if !strings.Contains(rendered, "One-time transfer") ||
+		!strings.Contains(rendered, "/source → /destination") ||
+		strings.Contains(rendered, `"profile_name"`) {
+		t.Fatalf("history list is not readable: %s", rendered)
+	}
+
+	updated, _ := model.handleHistory("enter")
+	model = updated.(Model)
+	rendered = stripANSI(model.renderHistory())
+	if !strings.Contains(rendered, "Transfer details") ||
+		!strings.Contains(rendered, "rsync --archive") {
+		t.Fatalf("history details are incomplete: %s", rendered)
 	}
 }
 
@@ -118,6 +254,15 @@ func TestParseExpertOptions(t *testing.T) {
 	if _, err := parseOptionString(`"--checksum`); err == nil {
 		t.Fatal("unterminated quote was accepted")
 	}
+}
+
+func containsMode(modes []domain.Mode, expected domain.Mode) bool {
+	for _, mode := range modes {
+		if mode == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func stripANSI(value string) string {

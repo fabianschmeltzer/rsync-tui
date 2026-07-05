@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +32,21 @@ const (
 	screenResult
 	screenInfo
 	screenSettings
+	screenHistory
 	screenBrowser
+)
+
+type wizardStage int
+
+const (
+	wizardChooseStorage wizardStage = iota
+	wizardName
+	wizardSource
+	wizardDestination
+	wizardMode
+	wizardAdvanced
+	wizardExpert
+	wizardReview
 )
 
 type runEventMsg rsyncengine.Event
@@ -70,7 +81,10 @@ type Model struct {
 	settingsCursor   int
 	status           string
 	input            textinput.Model
-	wizardStep       int
+	wizardStage      wizardStage
+	saveProfile      bool
+	profileChoice    int
+	wizardName       string
 	draft            domain.Profile
 	modeCursor       int
 	advancedCursor   int
@@ -87,6 +101,7 @@ type Model struct {
 	lastErr          error
 	pendingProfile   domain.Profile
 	pendingDryRun    bool
+	pendingAdHoc     bool
 	sshControlPath   string
 	pendingSSHAction string
 	browserEndpoint  domain.Endpoint
@@ -94,6 +109,11 @@ type Model struct {
 	browserCursor    int
 	browserCurrent   string
 	browserHidden    bool
+	history          []rsyncengine.Result
+	historyCursor    int
+	historyDetail    bool
+	historySkipped   int
+	historyError     string
 }
 
 var (
@@ -203,7 +223,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenResult
 			return m, nil
 		}
-		return m.startRun(m.pendingProfile, m.pendingDryRun)
+		return m.startRun(m.pendingProfile, m.pendingDryRun, m.pendingAdHoc)
 	case browserLoadedMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -226,17 +246,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
-		if m.screen == screenWizard && (m.wizardStep == 1 || m.wizardStep == 2) && msg.String() == "ctrl+b" {
+		if m.screen == screenWizard && (m.wizardStage == wizardSource || m.wizardStage == wizardDestination) && msg.String() == "ctrl+b" {
 			return m.openBrowser()
 		}
-		if m.screen == screenWizard && (m.wizardStep < 3 || m.wizardStep == 5) && msg.String() != "enter" && msg.String() != "esc" && msg.String() != "ctrl+c" {
+		if m.screen == screenWizard && wizardInputStage(m.wizardStage) && msg.String() != "enter" && msg.String() != "esc" && msg.String() != "ctrl+c" {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
 		}
 		return m.handleKey(msg)
 	}
-	if m.screen == screenWizard && (m.wizardStep < 3 || m.wizardStep == 5) {
+	if m.screen == screenWizard && wizardInputStage(m.wizardStage) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(message)
 		return m, cmd
@@ -274,6 +294,8 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case screenSettings:
 		return m.handleSettings(value)
+	case screenHistory:
+		return m.handleHistory(value)
 	case screenBrowser:
 		return m.handleBrowser(value)
 	}
@@ -310,7 +332,7 @@ func (m Model) handleHome(key string) (tea.Model, tea.Cmd) {
 		case 3:
 			m.showScheduleInfo()
 		case 4:
-			m.showHistory()
+			m.openHistory()
 		case 5:
 			m.screen = screenSettings
 			m.settingsCursor = 0
@@ -352,7 +374,7 @@ func (m Model) changeSetting(direction int) Model {
 	case 3:
 		next.UpdateChannel = cycleSetting(next.UpdateChannel, []string{"stable", "beta"}, direction)
 	case 4:
-		next.CheckHours = cycleIntSetting(next.CheckHours, []int{1, 6, 12, 24, 168}, direction)
+		next.CheckHours = cycleIntSetting(next.CheckHours, []int{0, 1, 6, 12, 24, 168}, direction)
 	}
 	return m.saveSettings(next)
 }
@@ -405,37 +427,66 @@ func cycleIntSetting(current int, options []int, direction int) int {
 }
 
 func (m *Model) startWizard() {
-	m.draft = domain.NewProfile("")
-	m.wizardStep = 0
+	m.draft = domain.NewProfile(domain.DefaultAdHocName)
+	m.wizardStage = wizardChooseStorage
+	m.saveProfile = false
+	m.profileChoice = 0
+	m.wizardName = ""
 	m.modeCursor = 0
 	m.advancedCursor = 0
 	m.expertOptions = nil
 	m.dryRun = true
 	m.confirm = 0
 	m.input.Reset()
-	m.input.Placeholder = "My backup"
+	m.input.Blur()
 	m.screen = screenWizard
 }
 
 func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 	if key == "esc" {
-		if m.wizardStep > 0 {
-			m.wizardStep--
-			m.loadWizardInput()
-			return m, m.input.Focus()
+		if m.wizardStage > wizardChooseStorage {
+			m.wizardStage--
+			m.status = ""
+			if wizardInputStage(m.wizardStage) {
+				m.loadWizardInput()
+				return m, m.input.Focus()
+			}
+			m.input.Blur()
+			if m.wizardStage == wizardMode {
+				modes := wizardModes(m.saveProfile)
+				if m.modeCursor >= len(modes) {
+					m.modeCursor = 0
+				}
+			}
+			return m, nil
 		}
 		m.screen = screenHome
 		return m, nil
 	}
-	if m.wizardStep < 3 {
+	if m.wizardStage == wizardChooseStorage {
+		switch key {
+		case "up", "k", "left", "h":
+			m.profileChoice = (m.profileChoice + 1) % 2
+		case "down", "j", "right", "l":
+			m.profileChoice = (m.profileChoice + 1) % 2
+		case "enter":
+			m.saveProfile = m.profileChoice == 1
+			m.modeCursor = 0
+			m.wizardStage = wizardName
+			m.loadWizardInput()
+			return m, m.input.Focus()
+		}
+		return m, nil
+	}
+	if m.wizardStage == wizardName || m.wizardStage == wizardSource || m.wizardStage == wizardDestination {
 		if key == "enter" {
 			if err := m.acceptWizardInput(); err != nil {
 				m.status = err.Error()
 				return m, nil
 			}
 			m.status = ""
-			m.wizardStep++
-			if m.wizardStep < 3 {
+			m.wizardStage++
+			if wizardInputStage(m.wizardStage) {
 				m.loadWizardInput()
 				return m, m.input.Focus()
 			}
@@ -444,8 +495,8 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.wizardStep == 3 {
-		modes := wizardModes()
+	if m.wizardStage == wizardMode {
+		modes := wizardModes(m.saveProfile)
 		switch key {
 		case "up", "k":
 			m.modeCursor = (m.modeCursor - 1 + len(modes)) % len(modes)
@@ -453,11 +504,11 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 			m.modeCursor = (m.modeCursor + 1) % len(modes)
 		case "enter":
 			m.draft.Mode = modes[m.modeCursor]
-			m.wizardStep = 4
+			m.wizardStage = wizardAdvanced
 		}
 		return m, nil
 	}
-	if m.wizardStep == 4 {
+	if m.wizardStage == wizardAdvanced {
 		options := wizardAdvancedOptions()
 		switch key {
 		case "up", "k":
@@ -467,13 +518,13 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 		case "space":
 			m.toggleAdvancedOption(options[m.advancedCursor])
 		case "enter":
-			m.wizardStep = 5
+			m.wizardStage = wizardExpert
 			m.loadWizardInput()
 			return m, m.input.Focus()
 		}
 		return m, nil
 	}
-	if m.wizardStep == 5 {
+	if m.wizardStage == wizardExpert {
 		if key == "enter" {
 			options, err := parseOptionString(m.input.Value())
 			if err != nil {
@@ -488,7 +539,7 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 			}
 			m.status = ""
 			m.input.Blur()
-			m.wizardStep = 6
+			m.wizardStage = wizardReview
 		}
 		return m, nil
 	}
@@ -505,34 +556,46 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.draft.Destructive() && !m.dryRun && m.confirm < 1 {
 			m.confirm++
-			m.status = "Dangerous run: press Enter once more to confirm."
+			m.status = m.translator.T("wizard.confirm_danger")
 			return m, nil
 		}
-		if err := m.store.SaveProfile(m.draft); err != nil {
+		if err := m.persistWizardProfile(); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		return m.beginRun(m.draft, m.dryRun)
+		return m.beginRun(m.draft, m.dryRun, !m.saveProfile)
 	}
 	return m, nil
 }
 
+func (m Model) persistWizardProfile() error {
+	if !m.saveProfile {
+		return nil
+	}
+	return m.store.SaveProfile(m.draft)
+}
+
 func (m *Model) acceptWizardInput() error {
 	value := strings.TrimSpace(m.input.Value())
-	switch m.wizardStep {
-	case 0:
-		if value == "" {
-			return fmt.Errorf("profile name is required")
+	switch m.wizardStage {
+	case wizardName:
+		if m.saveProfile && value == "" {
+			return fmt.Errorf("%s", m.translator.T("wizard.name_required"))
 		}
-		m.draft.Name = value
-	case 1:
-		endpoint, err := parseEndpoint(value)
+		m.wizardName = value
+		if value == "" {
+			m.draft.Name = domain.DefaultAdHocName
+		} else {
+			m.draft.Name = value
+		}
+	case wizardSource:
+		endpoint, err := domain.ParseEndpoint(value)
 		if err != nil {
 			return err
 		}
 		m.draft.Source = endpoint
-	case 2:
-		endpoint, err := parseEndpoint(value)
+	case wizardDestination:
+		endpoint, err := domain.ParseEndpoint(value)
 		if err != nil {
 			return err
 		}
@@ -543,20 +606,28 @@ func (m *Model) acceptWizardInput() error {
 
 func (m *Model) loadWizardInput() {
 	m.input.Reset()
-	switch m.wizardStep {
-	case 0:
-		m.input.Placeholder = "My backup"
-		m.input.SetValue(m.draft.Name)
-	case 1:
+	switch m.wizardStage {
+	case wizardName:
+		if m.saveProfile {
+			m.input.Placeholder = m.translator.T("wizard.name.profile_placeholder")
+		} else {
+			m.input.Placeholder = m.translator.T("wizard.name.optional_placeholder")
+		}
+		m.input.SetValue(m.wizardName)
+	case wizardSource:
 		m.input.Placeholder = "/source or user@host:/path"
 		m.input.SetValue(endpointString(m.draft.Source))
-	case 2:
+	case wizardDestination:
 		m.input.Placeholder = "/destination or ssh://user@host:22/path"
 		m.input.SetValue(endpointString(m.draft.Destination))
-	case 5:
+	case wizardExpert:
 		m.input.Placeholder = "--checksum --bwlimit=20m"
 		m.input.SetValue(strings.Join(m.expertOptions, " "))
 	}
+}
+
+func wizardInputStage(stage wizardStage) bool {
+	return stage == wizardName || stage == wizardSource || stage == wizardDestination || stage == wizardExpert
 }
 
 func (m *Model) toggleAdvancedOption(option string) {
@@ -596,14 +667,15 @@ func (m Model) handleProfiles(key string) (tea.Model, tea.Cmd) {
 		m.cursor = (m.cursor + 1) % len(m.profiles)
 	case "enter":
 		profile := m.profiles[m.cursor]
-		return m.beginRun(profile, profile.DryRunByDefault)
+		return m.beginRun(profile, profile.DryRunByDefault, false)
 	}
 	return m, nil
 }
 
-func (m Model) beginRun(profile domain.Profile, dryRun bool) (tea.Model, tea.Cmd) {
+func (m Model) beginRun(profile domain.Profile, dryRun, adHoc bool) (tea.Model, tea.Cmd) {
 	m.pendingProfile = profile
 	m.pendingDryRun = dryRun
+	m.pendingAdHoc = adHoc
 	if endpoint, remote := sshclient.RemoteEndpoint(profile); remote {
 		controlPath, err := sshclient.ControlPath(m.store.Paths.StateDir, endpoint)
 		if err != nil {
@@ -633,10 +705,10 @@ func (m Model) prepareSudo() (tea.Model, tea.Cmd) {
 			return sudoReadyMsg{err: err}
 		})
 	}
-	return m.startRun(m.pendingProfile, m.pendingDryRun)
+	return m.startRun(m.pendingProfile, m.pendingDryRun, m.pendingAdHoc)
 }
 
-func (m Model) startRun(profile domain.Profile, dryRun bool) (tea.Model, tea.Cmd) {
+func (m Model) startRun(profile domain.Profile, dryRun, adHoc bool) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.screen = screenRunning
@@ -652,6 +724,7 @@ func (m Model) startRun(profile domain.Profile, dryRun bool) (tea.Model, tea.Cmd
 			DryRun:         dryRun,
 			Version:        version,
 			SSHControlPath: m.sshControlPath,
+			AdHoc:          adHoc,
 			OnEvent: func(event rsyncengine.Event) {
 				events <- runEventMsg(event)
 			},
@@ -696,6 +769,8 @@ func (m Model) render() string {
 		body = m.status + "\n\nEnter/Esc — back"
 	case screenSettings:
 		body = m.renderSettings()
+	case screenHistory:
+		body = m.renderHistory()
 	case screenBrowser:
 		body = m.renderBrowser()
 	}
@@ -725,7 +800,7 @@ func (m Model) renderSettings() string {
 		m.translator.T("settings.theme." + m.settings.Theme),
 		m.translator.T(fmt.Sprintf("settings.bool.%t", m.settings.AutoUpdate)),
 		m.translator.T("settings.channel." + m.settings.UpdateChannel),
-		m.translator.T("settings.hours", m.settings.CheckHours),
+		m.checkIntervalLabel(),
 	}
 	labels := []string{
 		m.translator.T("settings.language"),
@@ -753,6 +828,13 @@ func (m Model) renderSettings() string {
 	return body
 }
 
+func (m Model) checkIntervalLabel() string {
+	if m.settings.CheckHours == 0 {
+		return m.translator.T("settings.every_start")
+	}
+	return m.translator.T("settings.hours", m.settings.CheckHours)
+}
+
 func (m Model) languageSettingLabel() string {
 	if m.settings.Language == "auto" {
 		return m.translator.T("settings.language.auto", m.translator.T("settings.language."+m.translator.Language))
@@ -761,29 +843,55 @@ func (m Model) languageSettingLabel() string {
 }
 
 func (m Model) renderWizard() string {
-	if m.wizardStep < 3 {
-		labels := []string{"Profile name", "Source", "Destination"}
+	stepTitle := func(label string) string {
+		return titleStyle.Render(m.translator.T("wizard.step", int(m.wizardStage)+1, 8, label))
+	}
+	if m.wizardStage == wizardChooseStorage {
+		labels := []string{
+			m.translator.T("wizard.storage.one_time"),
+			m.translator.T("wizard.storage.profile"),
+		}
+		lines := make([]string, 0, len(labels))
+		for index, label := range labels {
+			if index == m.profileChoice {
+				lines = append(lines, selectedStyle.Render("› "+label))
+			} else {
+				lines = append(lines, itemStyle.Render("  "+label))
+			}
+		}
+		return stepTitle(m.translator.T("wizard.storage.title")) + "\n\n" +
+			strings.Join(lines, "\n") + "\n\n" +
+			subtitleStyle.Render(m.translator.T("wizard.storage.help"))
+	}
+	if m.wizardStage == wizardName || m.wizardStage == wizardSource || m.wizardStage == wizardDestination {
+		label := m.translator.T("wizard.name.title")
+		if m.wizardStage == wizardSource {
+			label = m.translator.T("wizard.source")
+		}
+		if m.wizardStage == wizardDestination {
+			label = m.translator.T("wizard.destination")
+		}
 		help := ""
-		if m.wizardStep == 1 || m.wizardStep == 2 {
-			help = "\n\nCtrl+B — browse directories"
+		if m.wizardStage == wizardSource || m.wizardStage == wizardDestination {
+			help = "\n\n" + m.translator.T("wizard.browse_help")
 		}
 		return fmt.Sprintf("%s\n\n%s%s\n\n%s",
-			titleStyle.Render(fmt.Sprintf("Step %d/7 — %s", m.wizardStep+1, labels[m.wizardStep])),
+			stepTitle(label),
 			m.input.View(), help, renderStatus(m.status))
 	}
-	if m.wizardStep == 3 {
+	if m.wizardStage == wizardMode {
 		var lines []string
-		for index, mode := range wizardModes() {
-			label := strings.Title(string(mode))
+		for index, mode := range wizardModes(m.saveProfile) {
+			label := m.translator.T("wizard.mode." + string(mode))
 			if index == m.modeCursor {
 				lines = append(lines, selectedStyle.Render("› "+label))
 			} else {
 				lines = append(lines, itemStyle.Render("  "+label))
 			}
 		}
-		return titleStyle.Render("Step 4/7 — Mode") + "\n\n" + strings.Join(lines, "\n")
+		return stepTitle(m.translator.T("wizard.mode.title")) + "\n\n" + strings.Join(lines, "\n")
 	}
-	if m.wizardStep == 4 {
+	if m.wizardStage == wizardAdvanced {
 		var lines []string
 		selected := optionSet(m.selectedAdvancedOptions())
 		for index, option := range wizardAdvancedOptions() {
@@ -798,12 +906,12 @@ func (m Model) renderWizard() string {
 				lines = append(lines, itemStyle.Render("  "+label))
 			}
 		}
-		return titleStyle.Render("Step 5/7 — Advanced options") + "\n\n" +
+		return stepTitle(m.translator.T("wizard.advanced.title")) + "\n\n" +
 			strings.Join(lines, "\n") + "\n\nSpace — toggle • Enter — expert arguments"
 	}
-	if m.wizardStep == 5 {
+	if m.wizardStage == wizardExpert {
 		return fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s",
-			titleStyle.Render("Step 6/7 — Expert arguments"),
+			stepTitle(m.translator.T("wizard.expert.title")),
 			m.input.View(),
 			subtitleStyle.Render("Use --option=value. Internal/server options and positional arguments are rejected."),
 			renderStatus(m.status))
@@ -821,17 +929,35 @@ func (m Model) renderWizard() string {
 	}
 	confirm := ""
 	if m.confirm > 0 {
-		confirm = "\n" + errorStyle.Render("Press Enter again to start the destructive run.")
+		confirm = "\n" + errorStyle.Render(m.translator.T("wizard.confirm_again"))
 	}
-	return fmt.Sprintf("%s\n\n%s → %s\nMode: %s\nSource semantics: %s\nDry-run: %t%s\n\n%s\n\n[d] dry-run  [s] source semantics  [Enter] save & run%s\n%s",
-		titleStyle.Render("Step 7/7 — Review"),
+	storage := m.translator.T("wizard.storage.one_time")
+	action := m.translator.T("wizard.action.run")
+	if m.saveProfile {
+		storage = m.translator.T("wizard.storage.profile")
+		action = m.translator.T("wizard.action.save_run")
+	}
+	displayName := m.draft.Name
+	if !m.saveProfile && m.wizardName == "" {
+		displayName = m.translator.T("history.one_time")
+	}
+	return fmt.Sprintf("%s\n\n%s: %s\n%s: %s\n%s → %s\n%s: %s\n%s: %s\n%s: %s%s\n\n%s\n\n[d] dry-run  [s] source semantics  [Enter] %s%s\n%s",
+		stepTitle(m.translator.T("wizard.review.title")),
+		m.translator.T("wizard.name.title"),
+		displayName,
+		m.translator.T("wizard.storage.title"),
+		storage,
 		m.draft.Source.Address(false),
 		m.draft.Destination.Address(false),
+		m.translator.T("wizard.mode.title"),
 		m.draft.Mode,
+		m.translator.T("wizard.source_semantics"),
 		m.draft.SourceSemantics,
-		m.dryRun,
+		m.translator.T("wizard.dry_run"),
+		m.translator.T(fmt.Sprintf("settings.bool.%t", m.dryRun)),
 		danger,
 		commandText,
+		action,
 		confirm,
 		renderStatus(m.status))
 }
@@ -858,9 +984,13 @@ func (m Model) renderRunning() string {
 	if len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}
+	name := m.selected.Name
+	if m.pendingAdHoc && name == domain.DefaultAdHocName {
+		name = m.translator.T("history.one_time")
+	}
 	return fmt.Sprintf("%s %s\n\n%s\n\n%s\n\nCtrl+C — cancel",
 		m.spinner.View(),
-		titleStyle.Render("Running "+m.selected.Name),
+		titleStyle.Render("Running "+name),
 		subtitleStyle.Render(m.status),
 		strings.Join(lines, "\n"))
 }
@@ -912,7 +1042,7 @@ func (m Model) openBrowser() (tea.Model, tea.Cmd) {
 		home, _ := os.UserHomeDir()
 		value = home
 	}
-	endpoint, err := parseEndpoint(value)
+	endpoint, err := domain.ParseEndpoint(value)
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
@@ -961,7 +1091,7 @@ func (m Model) handleBrowser(key string) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		m.browserEndpoint.Path = m.browserCurrent
-		if m.wizardStep == 1 {
+		if m.wizardStage == wizardSource {
 			m.draft.Source = m.browserEndpoint
 		} else {
 			m.draft.Destination = m.browserEndpoint
@@ -1035,19 +1165,210 @@ func (m *Model) showScheduleInfo() {
 	m.screen = screenInfo
 }
 
-func (m *Model) showHistory() {
-	path := filepath.Join(m.store.Paths.StateDir, "history.jsonl")
-	data, err := os.ReadFile(path)
+func (m *Model) openHistory() {
+	history, err := rsyncengine.LoadHistory(m.store.Paths.StateDir, 100)
+	m.history = history.Entries
+	m.historySkipped = history.Skipped
+	m.historyCursor = 0
+	m.historyDetail = false
+	m.historyError = ""
 	if err != nil {
-		m.status = "No transfer history yet."
-	} else {
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) > 10 {
-			lines = lines[len(lines)-10:]
-		}
-		m.status = strings.Join(lines, "\n")
+		m.historyError = err.Error()
 	}
-	m.screen = screenInfo
+	m.status = ""
+	m.screen = screenHistory
+}
+
+func (m Model) handleHistory(key string) (tea.Model, tea.Cmd) {
+	if m.historyDetail {
+		switch key {
+		case "esc", "enter":
+			m.historyDetail = false
+		case "q":
+			m.historyDetail = false
+			m.screen = screenHome
+		}
+		return m, nil
+	}
+	switch key {
+	case "esc", "q":
+		m.screen = screenHome
+	case "up", "k":
+		if len(m.history) > 0 {
+			m.historyCursor = (m.historyCursor - 1 + len(m.history)) % len(m.history)
+		}
+	case "down", "j":
+		if len(m.history) > 0 {
+			m.historyCursor = (m.historyCursor + 1) % len(m.history)
+		}
+	case "enter":
+		if len(m.history) > 0 {
+			m.historyDetail = true
+		}
+	}
+	return m, nil
+}
+
+func (m Model) renderHistory() string {
+	if m.historyError != "" {
+		return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
+			errorStyle.Render(m.historyError) + "\n\n" +
+			subtitleStyle.Render(m.translator.T("history.help.back"))
+	}
+	if len(m.history) == 0 {
+		return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
+			subtitleStyle.Render(m.translator.T("history.empty")) + "\n\n" +
+			subtitleStyle.Render(m.translator.T("history.help.back"))
+	}
+	if m.historyDetail {
+		return m.renderHistoryDetail(m.history[m.historyCursor])
+	}
+
+	visible := max(1, (m.height-12)/3)
+	start := 0
+	if m.historyCursor >= visible {
+		start = m.historyCursor - visible + 1
+	}
+	end := min(len(m.history), start+visible)
+	width := max(30, min(92, m.width-14))
+	lines := make([]string, 0, (end-start)*3)
+	for index := start; index < end; index++ {
+		entry := m.history[index]
+		name := m.historyEntryName(entry)
+		mode := m.historyModeLabel(entry.Mode)
+		status := "✓"
+		statusStyle := successStyle
+		if entry.ExitCode != 0 {
+			status = "✗"
+			statusStyle = errorStyle
+		}
+		dryRun := ""
+		if entry.DryRun {
+			dryRun = " · " + m.translator.T("history.dry_run")
+		}
+		header := fmt.Sprintf("%s  %s  %s [%s] · %s%s",
+			status,
+			formatHistoryTime(entry.StartedAt),
+			name,
+			mode,
+			formatHistoryDuration(entry),
+			dryRun)
+		pathLine := entry.Source + " → " + entry.Destination
+		if entry.Source == "" && entry.Destination == "" {
+			pathLine = m.translator.T("history.legacy_entry")
+		}
+		header = truncateDisplay(header, width)
+		pathLine = truncateDisplay(pathLine, width)
+		if index == m.historyCursor {
+			lines = append(lines,
+				selectedStyle.Render("› "+header),
+				selectedStyle.Render("  "+pathLine))
+		} else {
+			lines = append(lines,
+				itemStyle.Render("  "+statusStyle.Render(status)+strings.TrimPrefix(header, status)),
+				subtitleStyle.Render("    "+pathLine))
+		}
+		if index+1 < end {
+			lines = append(lines, "")
+		}
+	}
+	footer := m.translator.T("history.help.list")
+	if m.historySkipped > 0 {
+		footer = m.translator.T("history.skipped", m.historySkipped) + "\n" + footer
+	}
+	return titleStyle.Render(m.translator.T("history.title")) + "\n\n" +
+		strings.Join(lines, "\n") + "\n\n" +
+		subtitleStyle.Render(footer)
+}
+
+func (m Model) renderHistoryDetail(entry rsyncengine.Result) string {
+	status := m.translator.T("history.status.success")
+	statusText := successStyle.Render(status)
+	if entry.ExitCode != 0 {
+		status = m.translator.T("history.status.failure")
+		statusText = errorStyle.Render(status)
+	}
+	lines := []string{
+		fmt.Sprintf("%s: %s", m.translator.T("history.name"), m.historyEntryName(entry)),
+		fmt.Sprintf("%s: %s", m.translator.T("history.status"), statusText),
+		fmt.Sprintf("%s: %s", m.translator.T("history.started"), formatHistoryTime(entry.StartedAt)),
+		fmt.Sprintf("%s: %s", m.translator.T("history.finished"), formatHistoryTime(entry.FinishedAt)),
+		fmt.Sprintf("%s: %s", m.translator.T("history.duration"), formatHistoryDuration(entry)),
+		fmt.Sprintf("%s: %d", m.translator.T("history.exit_code"), entry.ExitCode),
+		fmt.Sprintf("%s: %s", m.translator.T("history.dry_run"), m.translator.T(fmt.Sprintf("settings.bool.%t", entry.DryRun))),
+	}
+	if entry.Mode != "" {
+		lines = append(lines, fmt.Sprintf("%s: %s", m.translator.T("history.mode"), m.historyModeLabel(entry.Mode)))
+	}
+	if entry.Source != "" {
+		lines = append(lines, fmt.Sprintf("%s: %s", m.translator.T("history.source"), entry.Source))
+	}
+	if entry.Destination != "" {
+		lines = append(lines, fmt.Sprintf("%s: %s", m.translator.T("history.destination"), entry.Destination))
+	}
+	if entry.Error != "" {
+		lines = append(lines, "", errorStyle.Render(m.translator.T("history.error")+": "+entry.Error))
+	}
+	if entry.Command != "" {
+		commandWidth := max(28, min(90, m.width-16))
+		lines = append(lines, "",
+			m.translator.T("history.command")+":",
+			lipgloss.NewStyle().Width(commandWidth).Render(entry.Command))
+	}
+	return titleStyle.Render(m.translator.T("history.detail_title")) + "\n\n" +
+		strings.Join(lines, "\n") + "\n\n" +
+		subtitleStyle.Render(m.translator.T("history.help.detail"))
+}
+
+func (m Model) historyEntryName(entry rsyncengine.Result) string {
+	if entry.AdHoc && (entry.ProfileName == "" || entry.ProfileName == domain.DefaultAdHocName) {
+		return m.translator.T("history.one_time")
+	}
+	if strings.TrimSpace(entry.ProfileName) == "" {
+		return m.translator.T("history.unnamed")
+	}
+	return entry.ProfileName
+}
+
+func (m Model) historyModeLabel(mode domain.Mode) string {
+	switch mode {
+	case domain.ModeCopy, domain.ModeMirror, domain.ModeMove, domain.ModeSnapshot, domain.ModeRestore, domain.ModeCustom:
+		return m.translator.T("wizard.mode." + string(mode))
+	default:
+		return m.translator.T("history.mode.unknown")
+	}
+}
+
+func formatHistoryTime(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.Local().Format("02.01.2006 15:04:05")
+}
+
+func formatHistoryDuration(entry rsyncengine.Result) string {
+	if entry.StartedAt.IsZero() || entry.FinishedAt.IsZero() || entry.FinishedAt.Before(entry.StartedAt) {
+		return "—"
+	}
+	duration := entry.FinishedAt.Sub(entry.StartedAt)
+	if duration < time.Second {
+		return duration.Round(time.Millisecond).String()
+	}
+	return duration.Round(time.Second).String()
+}
+
+func truncateDisplay(value string, width int) string {
+	if width <= 1 {
+		return "…"
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	runes := []rune(value)
+	for len(runes) > 0 && lipgloss.Width(string(runes)+"…") > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 func (m Model) homeItems() []string {
@@ -1062,8 +1383,12 @@ func (m Model) homeItems() []string {
 	}
 }
 
-func wizardModes() []domain.Mode {
-	return []domain.Mode{domain.ModeCopy, domain.ModeMirror, domain.ModeMove, domain.ModeSnapshot, domain.ModeRestore, domain.ModeCustom}
+func wizardModes(saveProfile bool) []domain.Mode {
+	modes := []domain.Mode{domain.ModeCopy, domain.ModeMirror, domain.ModeMove}
+	if saveProfile {
+		modes = append(modes, domain.ModeSnapshot)
+	}
+	return append(modes, domain.ModeRestore, domain.ModeCustom)
 }
 
 func wizardAdvancedOptions() []string {
@@ -1137,45 +1462,6 @@ func parseOptionString(value string) ([]string, error) {
 	}
 	flush()
 	return result, nil
-}
-
-func parseEndpoint(value string) (domain.Endpoint, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return domain.Endpoint{}, fmt.Errorf("endpoint is required")
-	}
-	if strings.HasPrefix(value, "ssh://") {
-		parsed, err := url.Parse(value)
-		if err != nil {
-			return domain.Endpoint{}, err
-		}
-		port := 0
-		if parsed.Port() != "" {
-			port, err = strconv.Atoi(parsed.Port())
-			if err != nil {
-				return domain.Endpoint{}, err
-			}
-		}
-		user := ""
-		if parsed.User != nil {
-			user = parsed.User.Username()
-		}
-		endpoint := domain.Endpoint{Kind: domain.EndpointSSH, Host: parsed.Hostname(), User: user, Port: port, Path: parsed.Path}
-		return endpoint, endpoint.Validate()
-	}
-	if colon := strings.Index(value, ":"); colon > 0 && !strings.HasPrefix(value, "/") {
-		remote := value[:colon]
-		path := value[colon+1:]
-		user, host, _ := strings.Cut(remote, "@")
-		if host == "" {
-			host = user
-			user = ""
-		}
-		endpoint := domain.Endpoint{Kind: domain.EndpointSSH, Host: host, User: user, Path: path}
-		return endpoint, endpoint.Validate()
-	}
-	endpoint := domain.Endpoint{Kind: domain.EndpointLocal, Path: value}
-	return endpoint, endpoint.Validate()
 }
 
 func endpointString(endpoint domain.Endpoint) string {

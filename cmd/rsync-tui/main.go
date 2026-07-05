@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -96,12 +97,8 @@ func automaticUpdate(store *config.Store, settings config.Settings) bool {
 	if version == "dev" || !settings.AutoUpdate {
 		return false
 	}
-	interval := time.Duration(settings.CheckHours) * time.Hour
-	if interval <= 0 {
-		interval = 24 * time.Hour
-	}
 	now := time.Now()
-	if !updater.Due(store.Paths.StateDir, interval, now) {
+	if !automaticUpdateDue(store.Paths.StateDir, settings.CheckHours, now) {
 		return false
 	}
 	_ = updater.MarkChecked(store.Paths.StateDir, now)
@@ -113,6 +110,16 @@ func automaticUpdate(store *config.Store, settings config.Settings) bool {
 		return false
 	}
 	return client.Install(ctx, *available) == nil
+}
+
+func automaticUpdateDue(stateDirectory string, checkHours int, now time.Time) bool {
+	if checkHours == 0 {
+		return true
+	}
+	if checkHours < 0 {
+		checkHours = 24
+	}
+	return updater.Due(stateDirectory, time.Duration(checkHours)*time.Hour, now)
 }
 
 func versionCommand(args []string) int {
@@ -137,31 +144,21 @@ func versionCommand(args []string) int {
 }
 
 func runCommand(args []string) int {
-	flags := flag.NewFlagSet("run", flag.ContinueOnError)
-	profileID := flags.String("profile", "", "profile ID or name")
-	dryRun := flags.Bool("dry-run", false, "force a dry-run")
-	scheduled := flags.Bool("scheduled", false, "run with unattended safety rules")
-	if err := flags.Parse(args); err != nil {
-		return 64
-	}
-	if *profileID == "" {
-		fmt.Fprintln(os.Stderr, "--profile is required")
-		return 64
-	}
 	store, err := config.Open()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 64
 	}
-	profile, err := store.LoadProfile(*profileID)
+	request, err := parseRunRequest(store, args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 64
 	}
+	profile := request.Profile
 	manager := job.New(store)
 	controlPath := ""
 	if endpoint, remote := sshclient.RemoteEndpoint(profile); remote {
-		if *scheduled {
+		if request.Scheduled {
 			if err := sshclient.BatchCheck(context.Background(), endpoint, ""); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 65
@@ -180,17 +177,18 @@ func runCommand(args []string) int {
 			}
 		}
 	}
-	if profile.UseSudo && !*scheduled {
+	if profile.UseSudo && !request.Scheduled {
 		if err := authenticateSudo(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 65
 		}
 	}
 	outcome, err := manager.Execute(context.Background(), profile, job.Options{
-		DryRun:         *dryRun,
-		Scheduled:      *scheduled,
+		DryRun:         request.DryRun,
+		Scheduled:      request.Scheduled,
 		Version:        version,
 		SSHControlPath: controlPath,
+		AdHoc:          request.AdHoc,
 		OnEvent: func(event rsyncengine.Event) {
 			fmt.Println(event.Message)
 		},
@@ -206,6 +204,111 @@ func runCommand(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+type runRequest struct {
+	Profile   domain.Profile
+	DryRun    bool
+	Scheduled bool
+	AdHoc     bool
+}
+
+func parseRunRequest(store *config.Store, args []string) (runRequest, error) {
+	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+	profileID := flags.String("profile", "", "profile ID or name")
+	sourceValue := flags.String("source", "", "source path or SSH endpoint")
+	destinationValue := flags.String("destination", "", "destination path or SSH endpoint")
+	modeValue := flags.String("mode", string(domain.ModeCopy), "copy, mirror or move")
+	name := flags.String("name", "", "optional name for a one-time transfer")
+	sourceSemantics := flags.String("source-semantics", string(domain.CopyContents), "contents or directory")
+	useSudo := flags.Bool("sudo", false, "run a one-time transfer with sudo")
+	dryRun := flags.Bool("dry-run", false, "force a dry-run")
+	scheduled := flags.Bool("scheduled", false, "run with unattended safety rules")
+	execute := flags.Bool("execute", false, "execute a destructive one-time transfer")
+	yes := flags.Bool("yes", false, "confirm a destructive one-time transfer")
+	if err := flags.Parse(args); err != nil {
+		return runRequest{}, err
+	}
+	if flags.NArg() != 0 {
+		return runRequest{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	directFlags := map[string]bool{}
+	flags.Visit(func(item *flag.Flag) {
+		switch item.Name {
+		case "source", "destination", "mode", "name", "source-semantics", "sudo", "execute", "yes":
+			directFlags[item.Name] = true
+		}
+	})
+	if *profileID != "" {
+		if len(directFlags) > 0 {
+			return runRequest{}, fmt.Errorf("--profile cannot be combined with direct transfer flags")
+		}
+		profile, err := store.LoadProfile(*profileID)
+		if err != nil {
+			return runRequest{}, err
+		}
+		return runRequest{
+			Profile:   profile,
+			DryRun:    *dryRun,
+			Scheduled: *scheduled,
+		}, nil
+	}
+	if len(directFlags) == 0 {
+		return runRequest{}, fmt.Errorf("either --profile or --source and --destination are required")
+	}
+	if *scheduled {
+		return runRequest{}, fmt.Errorf("--scheduled requires a saved profile")
+	}
+	if strings.TrimSpace(*sourceValue) == "" || strings.TrimSpace(*destinationValue) == "" {
+		return runRequest{}, fmt.Errorf("--source and --destination are required for a one-time transfer")
+	}
+	source, err := domain.ParseEndpoint(*sourceValue)
+	if err != nil {
+		return runRequest{}, fmt.Errorf("source: %w", err)
+	}
+	destination, err := domain.ParseEndpoint(*destinationValue)
+	if err != nil {
+		return runRequest{}, fmt.Errorf("destination: %w", err)
+	}
+	mode := domain.Mode(strings.ToLower(strings.TrimSpace(*modeValue)))
+	switch mode {
+	case domain.ModeCopy, domain.ModeMirror, domain.ModeMove:
+	default:
+		return runRequest{}, fmt.Errorf("--mode must be copy, mirror or move")
+	}
+	semantics := domain.SourceSemantics(strings.ToLower(strings.TrimSpace(*sourceSemantics)))
+	if semantics != domain.CopyContents && semantics != domain.CopyDirectory {
+		return runRequest{}, fmt.Errorf("--source-semantics must be contents or directory")
+	}
+	if *dryRun && (*execute || *yes) {
+		return runRequest{}, fmt.Errorf("--dry-run cannot be combined with --execute or --yes")
+	}
+	destructive := mode == domain.ModeMirror || mode == domain.ModeMove
+	if !destructive && (*execute || *yes) {
+		return runRequest{}, fmt.Errorf("--execute and --yes are only valid for mirror or move")
+	}
+	directDryRun := *dryRun
+	if destructive {
+		if *execute != *yes {
+			return runRequest{}, fmt.Errorf("a real mirror or move requires both --execute and --yes")
+		}
+		directDryRun = !(*execute && *yes)
+	}
+	displayName := strings.TrimSpace(*name)
+	if displayName == "" {
+		displayName = domain.DefaultAdHocName
+	}
+	profile := domain.NewProfile(displayName)
+	profile.Mode = mode
+	profile.Source = source
+	profile.Destination = destination
+	profile.SourceSemantics = semantics
+	profile.UseSudo = *useSudo
+	return runRequest{
+		Profile: profile,
+		DryRun:  directDryRun,
+		AdHoc:   true,
+	}, nil
 }
 
 func doctorCommand(args []string) int {
@@ -688,6 +791,9 @@ func printHelp() {
 Usage:
   rsync-tui
   rsync-tui run --profile <id|name> [--dry-run] [--scheduled]
+  rsync-tui run --source <path> --destination <path> [--mode copy|mirror|move]
+                [--name <name>] [--source-semantics contents|directory] [--sudo]
+                [--dry-run | --execute --yes]
   rsync-tui profile list|show|configure
   rsync-tui notify test --profile <id|name>
   rsync-tui snapshot list|restore --profile <id|name>

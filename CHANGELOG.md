@@ -5,6 +5,20 @@ Semantic Versioning.
 
 ## [Unreleased][]
 
+## [0.1.2][] - 2026-07-05
+
+### Added
+
+- Added one-time transfers in the TUI and CLI without creating a saved profile
+- Added an every-start automatic update check interval
+- Added a navigable, localized transfer history with readable summaries and
+  detailed command and error views
+
+### Changed
+
+- Extended history records with mode and endpoint metadata while retaining
+  compatibility with existing JSONL entries
+
 ## [0.1.1][] - 2026-07-05
 
 ### Changed
@@ -33,6 +47,7 @@ Semantic Versioning.
 - ntfy, Gotify, generic webhook, Sendmail and SMTP/TLS notifications
 - Signed automatic updates, rollback, multi-architecture release workflow and SBOM
 
-[Unreleased]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/fabianschmeltzer/rsync-tui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fabianschmeltzer/rsync-tui/releases/tag/v0.1.0

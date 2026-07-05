@@ -4,7 +4,7 @@
 lokale und SSH-Übertragungen mit `rsync`. Sie richtet sich besonders an
 Raspberry Pi, OpenMediaVault, Debian-/Ubuntu-Server, USB-Speicher und Homelabs.
 
-> `v0.1.1` ist eine Beta. Vor Mirror- oder Move-Vorgängen immer den angezeigten
+> `v0.1.2` ist eine Beta. Vor Mirror- oder Move-Vorgängen immer den angezeigten
 > Befehl prüfen und den vorausgewählten Trockenlauf verwenden.
 
 [English documentation](README.md)
@@ -19,6 +19,7 @@ Raspberry Pi, OpenMediaVault, Debian-/Ubuntu-Server, USB-Speicher und Homelabs.
 - Lokaler und entfernter Verzeichnisbrowser über `Ctrl+B`
 - SSH-Push/Pull mit OpenSSH-Schlüsseln, Agent oder nativem Passwortdialog
 - Kopieren, Spiegeln, Verschieben, Snapshots, Wiederherstellen und Expertenmodus
+- Einmalige TUI- und CLI-Übertragungen ohne gespeichertes Profil
 - Vollständige Befehlsvorschau ohne lokale Shell-Auswertung
 - XDG-konforme TOML-Profile, Verlauf und Logs
 - `--link-dest`-Snapshots mit Last-N- oder GFS-Aufbewahrung
@@ -49,7 +50,7 @@ Als Root installiert das Skript standardmäßig nach
 Benutzerverzeichnis noch nicht im `PATH` steht, ergänzt das Skript
 `~/.profile`; die Änderung gilt ab der nächsten Shell. Standardmäßig wird die
 neueste veröffentlichte Version einschließlich Vorabversionen installiert.
-Eine bestimmte Version kann weiterhin mit `VERSION=v0.1.1 sh install.sh`
+Eine bestimmte Version kann weiterhin mit `VERSION=v0.1.2 sh install.sh`
 ausgewählt werden. Danach:
 
 ```bash
@@ -76,6 +77,7 @@ CLI:
 ```text
 rsync-tui
 rsync-tui run --profile <id|name> [--dry-run] [--scheduled]
+rsync-tui run --source <pfad> --destination <pfad> [--mode copy|mirror|move]
 rsync-tui profile list|show|configure
 rsync-tui notify test --profile <id|name>
 rsync-tui snapshot list --profile <id|name>
@@ -86,8 +88,18 @@ rsync-tui update [--check|--rollback]
 rsync-tui version [--json]
 ```
 
+Bei einer einmaligen CLI-Übertragung ist `--name` optional;
+`--source-semantics contents|directory` steuert den abschließenden Schrägstrich.
+Einmalige Mirror- und Move-Läufe bleiben Trockenläufe, solange nicht gemeinsam
+`--execute --yes` angegeben wird. Direkte Übertragungen können nicht geplant
+werden.
+
 Profile liegen unter `~/.config/rsync-tui/profiles/`, Verlauf und Logs unter
 `~/.local/state/rsync-tui/`.
+
+Das Prüfintervall in den Einstellungen bietet zusätzlich **Jeden Start**.
+Diese Auswahl gilt nur beim Start der TUI und bleibt ohne automatische Updates
+wirkungslos.
 
 ## Sicherheit
 
@@ -113,7 +125,7 @@ go vet ./...
 go build -o bin/rsync-tui ./cmd/rsync-tui
 ```
 
-Nicht Bestandteil von `v0.1.1` sind rsync-Daemonverwaltung,
+Nicht Bestandteil von `v0.1.2` sind rsync-Daemonverwaltung,
 bidirektionale Synchronisation, Remote-zu-Remote und Windows/macOS.
 
 Das frühere Whiptail-Skript liegt als nicht mehr unterstützte Referenz unter

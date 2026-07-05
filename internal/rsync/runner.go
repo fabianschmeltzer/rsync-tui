@@ -27,14 +27,18 @@ type Event struct {
 }
 
 type Result struct {
-	ProfileID   string    `json:"profile_id"`
-	ProfileName string    `json:"profile_name"`
-	StartedAt   time.Time `json:"started_at"`
-	FinishedAt  time.Time `json:"finished_at"`
-	DryRun      bool      `json:"dry_run"`
-	Command     string    `json:"command"`
-	ExitCode    int       `json:"exit_code"`
-	Error       string    `json:"error,omitempty"`
+	ProfileID   string      `json:"profile_id"`
+	ProfileName string      `json:"profile_name"`
+	Mode        domain.Mode `json:"mode,omitempty"`
+	Source      string      `json:"source,omitempty"`
+	Destination string      `json:"destination,omitempty"`
+	AdHoc       bool        `json:"ad_hoc,omitempty"`
+	StartedAt   time.Time   `json:"started_at"`
+	FinishedAt  time.Time   `json:"finished_at"`
+	DryRun      bool        `json:"dry_run"`
+	Command     string      `json:"command"`
+	ExitCode    int         `json:"exit_code"`
+	Error       string      `json:"error,omitempty"`
 }
 
 type RunOptions struct {
@@ -43,6 +47,7 @@ type RunOptions struct {
 	Build         BuildOptions
 	OnEvent       func(Event)
 	SkipPreflight bool
+	AdHoc         bool
 }
 
 type Runner struct {
@@ -53,6 +58,10 @@ func (r Runner) Run(ctx context.Context, profile domain.Profile, options RunOpti
 	result := Result{
 		ProfileID:   profile.ID,
 		ProfileName: profile.Name,
+		Mode:        profile.Mode,
+		Source:      profile.Source.Address(false),
+		Destination: profile.Destination.Address(false),
+		AdHoc:       options.AdHoc,
 		StartedAt:   time.Now().UTC(),
 		DryRun:      options.DryRun,
 		ExitCode:    -1,
