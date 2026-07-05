@@ -30,7 +30,14 @@ jobs:
         id: signing
         env:
           RSYNC_TUI_SIGNING_KEY: ${{ secrets.RSYNC_TUI_SIGNING_KEY }}
-        run: echo "public_key=$(go run ./cmd/release-helper public-key)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          if [ -z "${RSYNC_TUI_SIGNING_KEY:-}" ]; then
+            echo "::error::Repository secret RSYNC_TUI_SIGNING_KEY is not configured."
+            exit 1
+          fi
+          public_key="$(go run ./cmd/release-helper public-key)"
+          echo "public_key=${public_key}" >> "$GITHUB_OUTPUT"
 
       - name: Build release archives
         env:
