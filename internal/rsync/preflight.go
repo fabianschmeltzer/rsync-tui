@@ -16,20 +16,24 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// CheckLevel identifies the severity of a preflight check result.
 type CheckLevel string
 
+// Supported preflight check levels.
 const (
 	CheckOK      CheckLevel = "ok"
 	CheckWarning CheckLevel = "warning"
 	CheckError   CheckLevel = "error"
 )
 
+// Check describes one preflight validation result.
 type Check struct {
 	Name    string     `json:"name"`
 	Level   CheckLevel `json:"level"`
 	Message string     `json:"message"`
 }
 
+// Preflight validates whether a profile is ready to run.
 func Preflight(ctx context.Context, profile domain.Profile, scheduled bool) []Check {
 	checks := make([]Check, 0, 10)
 	if err := profile.Validate(); err != nil {
@@ -85,6 +89,7 @@ func Preflight(ctx context.Context, profile domain.Profile, scheduled bool) []Ch
 	return checks
 }
 
+// HasErrors reports whether any preflight check failed.
 func HasErrors(checks []Check) bool {
 	for _, check := range checks {
 		if check.Level == CheckError {
@@ -305,6 +310,7 @@ func firstLine(value string) string {
 
 var errPreflight = errors.New("preflight failed")
 
+// PreflightError combines failed preflight checks into a single error.
 func PreflightError(checks []Check) error {
 	if HasErrors(checks) {
 		return errPreflight

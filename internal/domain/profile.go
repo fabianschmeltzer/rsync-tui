@@ -12,8 +12,10 @@ import (
 	"time"
 )
 
+// Mode identifies the transfer operation performed by a profile.
 type Mode string
 
+// Supported transfer modes.
 const (
 	ModeCopy     Mode = "copy"
 	ModeMirror   Mode = "mirror"
@@ -23,29 +25,37 @@ const (
 	ModeCustom   Mode = "custom"
 )
 
+// DefaultAdHocName is the display name used for one-time transfers.
 const DefaultAdHocName = "One-time transfer"
 
+// EndpointKind identifies whether an endpoint is local or accessed over SSH.
 type EndpointKind string
 
+// Supported endpoint kinds.
 const (
 	EndpointLocal EndpointKind = "local"
 	EndpointSSH   EndpointKind = "ssh"
 )
 
+// SourceSemantics controls whether rsync copies a directory or only its contents.
 type SourceSemantics string
 
+// Supported source path interpretations.
 const (
 	CopyContents  SourceSemantics = "contents"
 	CopyDirectory SourceSemantics = "directory"
 )
 
+// RetentionMode identifies the policy used to prune snapshots.
 type RetentionMode string
 
+// Supported snapshot retention modes.
 const (
 	RetentionLastN RetentionMode = "last_n"
 	RetentionGFS   RetentionMode = "gfs"
 )
 
+// Endpoint describes a local path or a path on an SSH host.
 type Endpoint struct {
 	Kind EndpointKind `toml:"kind" json:"kind"`
 	Path string       `toml:"path" json:"path"`
@@ -54,10 +64,12 @@ type Endpoint struct {
 	Port int          `toml:"port,omitempty" json:"port,omitempty"`
 }
 
+// IsRemote reports whether the endpoint is accessed over SSH.
 func (e Endpoint) IsRemote() bool {
 	return e.Kind == EndpointSSH
 }
 
+// SSHHost returns the endpoint in the user@host form accepted by SSH.
 func (e Endpoint) SSHHost() string {
 	if e.User == "" {
 		return e.Host
@@ -65,6 +77,7 @@ func (e Endpoint) SSHHost() string {
 	return e.User + "@" + e.Host
 }
 
+// Address returns the endpoint path in the form accepted by rsync.
 func (e Endpoint) Address(copyContents bool) string {
 	path := e.Path
 	if copyContents && path != "/" {
@@ -76,6 +89,7 @@ func (e Endpoint) Address(copyContents bool) string {
 	return path
 }
 
+// Validate checks that the endpoint can be passed safely to rsync and SSH.
 func (e Endpoint) Validate() error {
 	if e.Kind != EndpointLocal && e.Kind != EndpointSSH {
 		return fmt.Errorf("unsupported endpoint kind %q", e.Kind)
@@ -121,11 +135,13 @@ func isSSHHostCharacter(character rune) bool {
 		strings.ContainsRune("._:-", character)
 }
 
+// FilterSet contains rsync include and exclude patterns.
 type FilterSet struct {
 	Include []string `toml:"include,omitempty" json:"include,omitempty"`
 	Exclude []string `toml:"exclude,omitempty" json:"exclude,omitempty"`
 }
 
+// Safety defines limits and confirmations for destructive transfers.
 type Safety struct {
 	AllowUnattendedDestructive bool   `toml:"allow_unattended_destructive" json:"allow_unattended_destructive"`
 	MaxDelete                  int    `toml:"max_delete,omitempty" json:"max_delete,omitempty"`
@@ -134,6 +150,7 @@ type Safety struct {
 	ExpectedDestinationDevice  string `toml:"expected_destination_device,omitempty" json:"expected_destination_device,omitempty"`
 }
 
+// Retention defines how many snapshots a pruning policy keeps.
 type Retention struct {
 	Mode    RetentionMode `toml:"mode" json:"mode"`
 	LastN   int           `toml:"last_n" json:"last_n"`
@@ -142,6 +159,7 @@ type Retention struct {
 	Monthly int           `toml:"monthly" json:"monthly"`
 }
 
+// DefaultRetention returns the standard snapshot retention policy.
 func DefaultRetention() Retention {
 	return Retention{
 		Mode:    RetentionLastN,
@@ -152,6 +170,7 @@ func DefaultRetention() Retention {
 	}
 }
 
+// SnapshotConfig controls snapshot creation, retention, and verification.
 type SnapshotConfig struct {
 	Enabled        bool      `toml:"enabled" json:"enabled"`
 	Root           string    `toml:"root,omitempty" json:"root,omitempty"`
@@ -159,12 +178,14 @@ type SnapshotConfig struct {
 	VerifyAfterRun bool      `toml:"verify_after_run" json:"verify_after_run"`
 }
 
+// Schedule configures unattended execution through the system scheduler.
 type Schedule struct {
 	Enabled    bool   `toml:"enabled" json:"enabled"`
 	OnCalendar string `toml:"on_calendar,omitempty" json:"on_calendar,omitempty"`
 	System     bool   `toml:"system" json:"system"`
 }
 
+// SMTPConfig contains the non-secret settings and secret references for email delivery.
 type SMTPConfig struct {
 	Address      string `toml:"address,omitempty" json:"address,omitempty"`
 	Username     string `toml:"username,omitempty" json:"username,omitempty"`
@@ -174,6 +195,7 @@ type SMTPConfig struct {
 	To           string `toml:"to,omitempty" json:"to,omitempty"`
 }
 
+// Notifications configures completion notifications for a profile.
 type Notifications struct {
 	OnSuccess       bool       `toml:"on_success" json:"on_success"`
 	OnFailure       bool       `toml:"on_failure" json:"on_failure"`
@@ -190,6 +212,7 @@ type Notifications struct {
 	SMTP            SMTPConfig `toml:"smtp,omitempty" json:"smtp,omitempty"`
 }
 
+// Profile contains the complete configuration for one rsync job.
 type Profile struct {
 	SchemaVersion   int             `toml:"schema_version" json:"schema_version"`
 	ID              string          `toml:"id" json:"id"`
@@ -212,6 +235,7 @@ type Profile struct {
 	UpdatedAt       time.Time       `toml:"updated_at" json:"updated_at"`
 }
 
+// NewProfile returns a profile initialized with safe defaults.
 func NewProfile(name string) Profile {
 	now := time.Now().UTC()
 	return Profile{
@@ -230,10 +254,12 @@ func NewProfile(name string) Profile {
 	}
 }
 
+// Destructive reports whether the profile may delete destination or source files.
 func (p Profile) Destructive() bool {
 	return p.Mode == ModeMirror || p.Mode == ModeMove
 }
 
+// Validate checks a profile for supported, internally consistent, and safe settings.
 func (p Profile) Validate() error {
 	if p.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported profile schema %d", p.SchemaVersion)
@@ -304,6 +330,7 @@ func newID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// CanonicalLocalPath returns an absolute, cleaned path with symlinks resolved when possible.
 func CanonicalLocalPath(path string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {

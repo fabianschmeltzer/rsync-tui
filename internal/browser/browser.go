@@ -14,11 +14,13 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// Entry describes a directory shown in the path browser.
 type Entry struct {
 	Name string
 	Path string
 }
 
+// LocalDirectories lists child directories of a local path.
 func LocalDirectories(current string, showHidden bool) ([]Entry, error) {
 	if current == "" {
 		var err error
@@ -61,6 +63,7 @@ func LocalDirectories(current string, showHidden bool) ([]Entry, error) {
 	return entries, nil
 }
 
+// Shortcuts returns common local-directory shortcuts for the current user.
 func Shortcuts() []Entry {
 	home, _ := os.UserHomeDir()
 	candidates := []Entry{
@@ -91,6 +94,7 @@ func Shortcuts() []Entry {
 	return result
 }
 
+// RemoteDirectories lists child directories on an SSH endpoint.
 func RemoteDirectories(ctx context.Context, endpoint domain.Endpoint, controlPath, current string, showHidden bool) ([]Entry, error) {
 	if !endpoint.IsRemote() {
 		return nil, fmt.Errorf("endpoint is not remote")
@@ -128,6 +132,7 @@ func RemoteDirectories(ctx context.Context, endpoint domain.Endpoint, controlPat
 	return entries, nil
 }
 
+// ValidateRemotePath checks that a remote path exists and is optionally writable.
 func ValidateRemotePath(ctx context.Context, endpoint domain.Endpoint, controlPath string, writable bool) error {
 	test := "test -d " + shellQuote(endpoint.Path)
 	if writable {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 )
 
+// HistoryReadResult contains valid history entries and the number of malformed entries skipped.
 type HistoryReadResult struct {
 	Entries []Result
 	Skipped int

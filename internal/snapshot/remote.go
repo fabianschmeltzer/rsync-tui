@@ -18,6 +18,7 @@ import (
 
 var snapshotIDPattern = regexp.MustCompile(`^\d{8}T\d{6}Z(?:-\d+)?$`)
 
+// PrepareRemote creates the staging area for a snapshot on an SSH endpoint.
 func (Manager) PrepareRemote(ctx context.Context, profile domain.Profile, controlPath string, now time.Time) (Prepared, error) {
 	if !profile.Destination.IsRemote() {
 		return Prepared{}, errors.New("remote snapshot preparation requires an SSH destination")
@@ -32,6 +33,7 @@ func (Manager) PrepareRemote(ctx context.Context, profile domain.Profile, contro
 	return prepared, nil
 }
 
+// PlanRemote computes remote snapshot paths without creating them.
 func (Manager) PlanRemote(ctx context.Context, profile domain.Profile, controlPath string, now time.Time) (Prepared, error) {
 	if !profile.Destination.IsRemote() {
 		return Prepared{}, errors.New("remote snapshot planning requires an SSH destination")
@@ -69,6 +71,7 @@ func planRemote(ctx context.Context, profile domain.Profile, controlPath string,
 	}, nil
 }
 
+// FinalizeRemote commits or removes a prepared remote snapshot based on run success.
 func (Manager) FinalizeRemote(ctx context.Context, endpoint domain.Endpoint, controlPath string, prepared Prepared, success bool) (Record, error) {
 	record := prepared.Record
 	record.Successful = success
@@ -93,6 +96,7 @@ func (Manager) FinalizeRemote(ctx context.Context, endpoint domain.Endpoint, con
 	return record, err
 }
 
+// ListRemote returns snapshots stored for a profile on an SSH endpoint.
 func (Manager) ListRemote(ctx context.Context, profile domain.Profile, controlPath string) ([]Record, error) {
 	root := profile.Snapshot.Root
 	if root == "" {
@@ -130,6 +134,7 @@ func (Manager) ListRemote(ctx context.Context, profile domain.Profile, controlPa
 	return records, nil
 }
 
+// PruneRemote removes remote snapshots not selected by the retention policy.
 func (manager Manager) PruneRemote(ctx context.Context, profile domain.Profile, controlPath string) ([]Record, error) {
 	records, err := manager.ListRemote(ctx, profile, controlPath)
 	if err != nil {

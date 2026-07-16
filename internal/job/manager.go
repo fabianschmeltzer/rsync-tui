@@ -19,6 +19,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/sshclient"
 )
 
+// Options controls the execution of a managed job.
 type Options struct {
 	DryRun         bool
 	Scheduled      bool
@@ -28,6 +29,7 @@ type Options struct {
 	AdHoc          bool
 }
 
+// Outcome contains the result and notifications produced by a job.
 type Outcome struct {
 	Result               rsyncengine.Result
 	Preview              *rsyncengine.Result
@@ -36,6 +38,7 @@ type Outcome struct {
 	NotificationWarnings []error
 }
 
+// Manager coordinates profile validation, execution, and persistence.
 type Manager struct {
 	Store         *config.Store
 	Runner        rsyncengine.Runner
@@ -43,6 +46,7 @@ type Manager struct {
 	Notifications notify.Sender
 }
 
+// New returns a job manager backed by the provided configuration store.
 func New(store *config.Store) Manager {
 	return Manager{
 		Store:     store,
@@ -51,6 +55,7 @@ func New(store *config.Store) Manager {
 	}
 }
 
+// Execute runs a profile and records its outcome.
 func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Options) (Outcome, error) {
 	var outcome Outcome
 	if endpoint, remote := sshclient.RemoteEndpoint(profile); remote {

@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// Catalog maps translation keys to localized messages.
 type Catalog map[string]string
 
 var catalogs = map[string]Catalog{
@@ -309,10 +310,12 @@ var catalogs = map[string]Catalog{
 	},
 }
 
+// Translator resolves messages for the active language.
 type Translator struct {
 	Language string
 }
 
+// Detect selects a supported language from an explicit request or the environment.
 func Detect(requested string) string {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	if requested == "de" || requested == "en" {
@@ -330,10 +333,12 @@ func Detect(requested string) string {
 	return "en"
 }
 
+// New returns a translator for the requested language.
 func New(language string) Translator {
 	return Translator{Language: Detect(language)}
 }
 
+// T translates a key and formats it with optional arguments.
 func (t Translator) T(key string, args ...any) string {
 	catalog, ok := catalogs[t.Language]
 	if !ok {
@@ -352,6 +357,7 @@ func (t Translator) T(key string, args ...any) string {
 	return value
 }
 
+// Toggle switches between the supported user-interface languages.
 func (t *Translator) Toggle() {
 	if t.Language == "de" {
 		t.Language = "en"
@@ -360,6 +366,7 @@ func (t *Translator) Toggle() {
 	}
 }
 
+// ValidateCatalogs checks that all language catalogs contain matching keys.
 func ValidateCatalogs() error {
 	for key := range catalogs["en"] {
 		if _, ok := catalogs["de"][key]; !ok {

@@ -13,6 +13,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// Record describes a completed snapshot stored on an endpoint.
 type Record struct {
 	ID          string    `json:"id"`
 	ProfileID   string    `json:"profile_id"`
@@ -22,6 +23,7 @@ type Record struct {
 	Successful  bool      `json:"successful"`
 }
 
+// Prepared contains the paths and metadata for an in-progress snapshot.
 type Prepared struct {
 	Record          Record
 	PartialPath     string
@@ -29,8 +31,10 @@ type Prepared struct {
 	LinkDestination string
 }
 
+// Manager creates, lists, and prunes snapshots.
 type Manager struct{}
 
+// Prepare creates the local staging area for a snapshot.
 func (Manager) Prepare(profile domain.Profile, now time.Time) (Prepared, error) {
 	if profile.Destination.IsRemote() {
 		return Prepared{}, errors.New("remote snapshot repositories require the SSH snapshot coordinator")
@@ -45,6 +49,7 @@ func (Manager) Prepare(profile domain.Profile, now time.Time) (Prepared, error) 
 	return prepared, nil
 }
 
+// Plan computes local snapshot paths without creating them.
 func (Manager) Plan(profile domain.Profile, now time.Time) (Prepared, error) {
 	if profile.Destination.IsRemote() {
 		return Prepared{}, errors.New("remote snapshot repositories require the SSH snapshot coordinator")
@@ -94,6 +99,7 @@ func planLocal(profile domain.Profile, now time.Time) (Prepared, error) {
 	}, nil
 }
 
+// Finalize commits or removes a prepared local snapshot based on run success.
 func (Manager) Finalize(prepared Prepared, success bool) (Record, error) {
 	record := prepared.Record
 	record.Successful = success
@@ -127,6 +133,7 @@ func (Manager) Finalize(prepared Prepared, success bool) (Record, error) {
 	return record, nil
 }
 
+// List returns snapshots stored for a local profile.
 func (Manager) List(profile domain.Profile) ([]Record, error) {
 	root := profile.Snapshot.Root
 	if root == "" {
@@ -163,6 +170,7 @@ func (Manager) List(profile domain.Profile) ([]Record, error) {
 	return records, nil
 }
 
+// SelectKeep returns the snapshot paths retained by a policy.
 func SelectKeep(records []Record, retention domain.Retention) map[string]bool {
 	keep := make(map[string]bool)
 	if len(records) == 0 {
@@ -196,6 +204,7 @@ func SelectKeep(records []Record, retention domain.Retention) map[string]bool {
 	return keep
 }
 
+// Prune removes local snapshots not selected by the retention policy.
 func (manager Manager) Prune(profile domain.Profile) ([]Record, error) {
 	records, err := manager.List(profile)
 	if err != nil {

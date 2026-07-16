@@ -20,12 +20,14 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// Event reports output or progress from an rsync run.
 type Event struct {
 	Time    time.Time `json:"time"`
 	Stream  string    `json:"stream"`
 	Message string    `json:"message"`
 }
 
+// Result summarizes a completed rsync run.
 type Result struct {
 	ProfileID   string      `json:"profile_id"`
 	ProfileName string      `json:"profile_name"`
@@ -41,6 +43,7 @@ type Result struct {
 	Error       string      `json:"error,omitempty"`
 }
 
+// RunOptions controls execution and event handling for an rsync run.
 type RunOptions struct {
 	DryRun        bool
 	Scheduled     bool
@@ -50,10 +53,12 @@ type RunOptions struct {
 	AdHoc         bool
 }
 
+// Runner executes validated rsync profiles.
 type Runner struct {
 	Store *config.Store
 }
 
+// Run executes a profile and returns its result.
 func (r Runner) Run(ctx context.Context, profile domain.Profile, options RunOptions) (Result, error) {
 	result := Result{
 		ProfileID:   profile.ID,
@@ -312,6 +317,7 @@ func removeRemoteEmptyDirectories(ctx context.Context, source domain.Endpoint, c
 	return nil
 }
 
+// RuntimePlatform returns the current operating system and architecture.
 func RuntimePlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
 }

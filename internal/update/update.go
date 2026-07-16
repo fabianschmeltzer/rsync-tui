@@ -26,13 +26,16 @@ import (
 
 const releasesURL = "https://api.github.com/repos/fabianschmeltzer/rsync-tui/releases?per_page=20"
 
+// EmbeddedPublicKey contains the release-signing public key injected at build time.
 var EmbeddedPublicKey = ""
 
+// Asset describes a downloadable release archive.
 type Asset struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 }
 
+// Manifest describes a signed application release.
 type Manifest struct {
 	Version string           `json:"version"`
 	Assets  map[string]Asset `json:"assets"`
@@ -48,6 +51,7 @@ type release struct {
 	} `json:"assets"`
 }
 
+// Available contains an update manifest and its matching platform asset.
 type Available struct {
 	Version      string
 	Manifest     Manifest
@@ -55,12 +59,14 @@ type Available struct {
 	SignatureRaw []byte
 }
 
+// Client checks for signed releases and installs verified updates.
 type Client struct {
 	HTTP      *http.Client
 	PublicKey ed25519.PublicKey
 	APIURL    string
 }
 
+// Check returns a newer verified release for the requested channel, if available.
 func (c Client) Check(ctx context.Context, current, channel string) (*Available, error) {
 	if current == "dev" || current == "" {
 		return nil, nil
@@ -111,6 +117,7 @@ func (c Client) Check(ctx context.Context, current, channel string) (*Available,
 	return nil, nil
 }
 
+// Install downloads, verifies, self-tests, and activates an available release.
 func (c Client) Install(ctx context.Context, available Available) error {
 	if locks, _ := filepath.Glob(filepath.Join(stateDir(), "run-*.lock")); len(locks) > 0 {
 		return errors.New("an rsync-tui transfer is active; update deferred")
@@ -156,12 +163,10 @@ func (c Client) Install(ctx context.Context, available Available) error {
 	if err := backupFile(executable, previous); err != nil {
 		return err
 	}
-	if err := os.Rename(candidate, executable); err != nil {
-		return err
-	}
-	return nil
+	return os.Rename(candidate, executable)
 }
 
+// Rollback restores the executable saved by the previous update.
 func Rollback() error {
 	executable, err := os.Executable()
 	if err != nil {

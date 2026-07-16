@@ -21,6 +21,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// Event contains the profile and result data sent to notification backends.
 type Event struct {
 	Event            string    `json:"event"`
 	Status           string    `json:"status"`
@@ -37,10 +38,12 @@ type Event struct {
 	Version          string    `json:"version"`
 }
 
+// Sender dispatches job-completion notifications.
 type Sender struct {
 	Client *http.Client
 }
 
+// Send delivers an event through each configured notification backend.
 func (s Sender) Send(ctx context.Context, configuration domain.Notifications, event Event) []error {
 	if event.Status == "success" && !configuration.OnSuccess {
 		return nil

@@ -75,6 +75,7 @@ type dashboardLoadedMsg struct {
 	history   []rsyncengine.Result
 }
 
+// Model contains the terminal user-interface state.
 type Model struct {
 	store            *config.Store
 	settings         config.Settings
@@ -127,6 +128,7 @@ type Model struct {
 	hoverIndex       int
 }
 
+// New returns an initialized terminal user-interface model.
 func New(store *config.Store, settings config.Settings, version string) Model {
 	design := newDesignSystem(settings, os.Getenv("NO_COLOR") != "")
 	input := textinput.New()
@@ -147,10 +149,12 @@ func New(store *config.Store, settings config.Settings, version string) Model {
 	}
 }
 
+// Init starts initial background work for the terminal interface.
 func (m Model) Init() tea.Cmd {
 	return loadDashboard(m.store)
 }
 
+// Update applies a Bubble Tea message to the model.
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
@@ -756,6 +760,7 @@ func waitForRunEvent(events <-chan tea.Msg) tea.Cmd {
 	}
 }
 
+// View renders the current terminal interface.
 func (m Model) View() tea.View {
 	content := m.render()
 	view := tea.NewView(content)

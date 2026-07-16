@@ -13,6 +13,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// Settings contains application-wide user preferences.
 type Settings struct {
 	SchemaVersion int    `toml:"schema_version"`
 	Language      string `toml:"language"`
@@ -26,6 +27,7 @@ type Settings struct {
 	CheckHours    int    `toml:"check_hours"`
 }
 
+// DefaultSettings returns application settings initialized with safe defaults.
 func DefaultSettings() Settings {
 	return Settings{
 		SchemaVersion: 1,
@@ -41,6 +43,7 @@ func DefaultSettings() Settings {
 	}
 }
 
+// Paths contains the application configuration and state locations.
 type Paths struct {
 	ConfigDir   string
 	ProfilesDir string
@@ -49,6 +52,7 @@ type Paths struct {
 	CacheDir    string
 }
 
+// ResolvePaths determines the platform-appropriate configuration and state paths.
 func ResolvePaths() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -68,6 +72,7 @@ func ResolvePaths() (Paths, error) {
 	}, nil
 }
 
+// Ensure creates the required configuration and state directories.
 func (p Paths) Ensure() error {
 	for _, dir := range []string{p.ConfigDir, p.ProfilesDir, p.StateDir, p.LogDir, p.CacheDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -77,10 +82,12 @@ func (p Paths) Ensure() error {
 	return nil
 }
 
+// Store persists settings, profiles, and runtime state.
 type Store struct {
 	Paths Paths
 }
 
+// Open resolves application paths and returns an initialized store.
 func Open() (*Store, error) {
 	paths, err := ResolvePaths()
 	if err != nil {
@@ -92,6 +99,7 @@ func Open() (*Store, error) {
 	return &Store{Paths: paths}, nil
 }
 
+// LoadSettings reads application settings or returns defaults when absent.
 func (s *Store) LoadSettings() (Settings, error) {
 	path := filepath.Join(s.Paths.ConfigDir, "config.toml")
 	data, err := os.ReadFile(path)
@@ -115,6 +123,7 @@ func (s *Store) LoadSettings() (Settings, error) {
 	return normalizeSettings(settings), nil
 }
 
+// SaveSettings validates and atomically persists application settings.
 func (s *Store) SaveSettings(settings Settings) error {
 	settings = normalizeSettings(settings)
 	data, err := toml.Marshal(settings)
@@ -156,6 +165,7 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
+// SaveProfile validates and atomically persists a profile.
 func (s *Store) SaveProfile(profile domain.Profile) error {
 	if profile.ID == "" {
 		return errors.New("profile has no ID")
@@ -175,6 +185,7 @@ func (s *Store) SaveProfile(profile domain.Profile) error {
 	return atomicWrite(s.profilePath(profile.ID), data, 0o600)
 }
 
+// LoadProfile reads a profile by identifier.
 func (s *Store) LoadProfile(identifier string) (domain.Profile, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return domain.Profile{}, errors.New("profile identifier is empty")
@@ -195,6 +206,7 @@ func (s *Store) LoadProfile(identifier string) (domain.Profile, error) {
 	return domain.Profile{}, fmt.Errorf("profile %q not found", identifier)
 }
 
+// ListProfiles returns all persisted profiles.
 func (s *Store) ListProfiles() ([]domain.Profile, error) {
 	entries, err := os.ReadDir(s.Paths.ProfilesDir)
 	if err != nil {
@@ -217,6 +229,7 @@ func (s *Store) ListProfiles() ([]domain.Profile, error) {
 	return profiles, nil
 }
 
+// DeleteProfile removes a persisted profile by identifier.
 func (s *Store) DeleteProfile(id string) error {
 	if strings.TrimSpace(id) == "" || strings.ContainsAny(id, `/\`) {
 		return errors.New("invalid profile ID")

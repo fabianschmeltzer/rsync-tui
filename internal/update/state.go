@@ -8,10 +8,12 @@ import (
 	"time"
 )
 
+// State records when the application last checked for updates.
 type State struct {
 	LastCheck time.Time `json:"last_check"`
 }
 
+// Due reports whether the configured update-check interval has elapsed.
 func Due(stateDirectory string, interval time.Duration, now time.Time) bool {
 	state, err := LoadState(stateDirectory)
 	if err != nil {
@@ -20,6 +22,7 @@ func Due(stateDirectory string, interval time.Duration, now time.Time) bool {
 	return state.LastCheck.IsZero() || now.Sub(state.LastCheck) >= interval
 }
 
+// LoadState reads update state or returns an empty state when absent.
 func LoadState(stateDirectory string) (State, error) {
 	data, err := os.ReadFile(filepath.Join(stateDirectory, "update-state.json"))
 	if err != nil {
@@ -32,6 +35,7 @@ func LoadState(stateDirectory string) (State, error) {
 	return state, nil
 }
 
+// MarkChecked records a successful update check.
 func MarkChecked(stateDirectory string, now time.Time) error {
 	if stateDirectory == "" {
 		return errors.New("state directory is empty")

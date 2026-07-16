@@ -11,6 +11,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// Units contains rendered systemd service and timer definitions.
 type Units struct {
 	ServiceName string
 	TimerName   string
@@ -18,6 +19,7 @@ type Units struct {
 	Timer       string
 }
 
+// Render creates systemd unit definitions for a scheduled profile.
 func Render(profile domain.Profile, executable string) (Units, error) {
 	if !profile.Schedule.Enabled {
 		return Units{}, errors.New("profile schedule is disabled")
@@ -61,6 +63,7 @@ WantedBy=timers.target
 	}, nil
 }
 
+// Install writes and enables systemd units for a scheduled profile.
 func Install(profile domain.Profile, executable string) (Units, error) {
 	units, err := Render(profile, executable)
 	if err != nil {

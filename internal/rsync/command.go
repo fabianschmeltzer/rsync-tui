@@ -9,6 +9,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// BuildOptions controls command construction for an rsync run.
 type BuildOptions struct {
 	DryRun              bool
 	DestinationOverride string
@@ -17,6 +18,7 @@ type BuildOptions struct {
 	SSHControlPath      string
 }
 
+// Command contains executable arguments and a display-safe representation.
 type Command struct {
 	Program string   `json:"program"`
 	Args    []string `json:"args"`
@@ -31,6 +33,7 @@ var forbiddenOptions = []string{
 	"--password-file",
 }
 
+// Build constructs and validates the rsync command for a profile.
 func Build(profile domain.Profile, options BuildOptions) (Command, error) {
 	if err := profile.Validate(); err != nil {
 		return Command{}, err
@@ -192,6 +195,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+// DisplayWithSudo returns the display form of a command prefixed with sudo.
 func DisplayWithSudo(command Command, nonInteractive bool) string {
 	if nonInteractive {
 		return "sudo -n " + command.Display

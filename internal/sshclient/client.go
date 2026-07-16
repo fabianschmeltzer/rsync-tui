@@ -15,6 +15,7 @@ import (
 	"github.com/fabianschmeltzer/rsync-tui/internal/domain"
 )
 
+// RemoteEndpoint returns the remote endpoint in a profile, if one exists.
 func RemoteEndpoint(profile domain.Profile) (domain.Endpoint, bool) {
 	if profile.Source.IsRemote() {
 		return profile.Source, true
@@ -25,6 +26,7 @@ func RemoteEndpoint(profile domain.Profile) (domain.Endpoint, bool) {
 	return domain.Endpoint{}, false
 }
 
+// ControlPath returns a stable local control-socket path for an SSH endpoint.
 func ControlPath(stateDir string, endpoint domain.Endpoint) (string, error) {
 	if !endpoint.IsRemote() {
 		return "", errors.New("endpoint is not remote")
@@ -37,6 +39,7 @@ func ControlPath(stateDir string, endpoint domain.Endpoint) (string, error) {
 	return filepath.Join(directory, "cm-"+hex.EncodeToString(sum[:8])), nil
 }
 
+// MasterCommand constructs the persistent SSH control-master command.
 func MasterCommand(endpoint domain.Endpoint, controlPath string) *exec.Cmd {
 	args := []string{
 		"-o", "ControlMaster=auto",
@@ -50,6 +53,7 @@ func MasterCommand(endpoint domain.Endpoint, controlPath string) *exec.Cmd {
 	return exec.Command("ssh", args...)
 }
 
+// BatchCheck verifies non-interactive SSH connectivity through a control socket.
 func BatchCheck(ctx context.Context, endpoint domain.Endpoint, controlPath string) error {
 	args := []string{
 		"-o", "BatchMode=yes",
@@ -69,6 +73,7 @@ func BatchCheck(ctx context.Context, endpoint domain.Endpoint, controlPath strin
 	return nil
 }
 
+// CheckRsync verifies that rsync is available on the remote endpoint.
 func CheckRsync(ctx context.Context, endpoint domain.Endpoint, controlPath string) error {
 	args := []string{"-o", "BatchMode=yes"}
 	if controlPath != "" {
@@ -88,6 +93,7 @@ func CheckRsync(ctx context.Context, endpoint domain.Endpoint, controlPath strin
 	return nil
 }
 
+// Close asks SSH to terminate the control-master connection.
 func Close(endpoint domain.Endpoint, controlPath string) {
 	if controlPath == "" {
 		return
