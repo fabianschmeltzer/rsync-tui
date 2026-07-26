@@ -470,6 +470,8 @@ func (m *Model) startWizardEdit(profile domain.Profile) {
 	m.wizardName = profile.Name
 	m.modeCursor = modeIndex(profile.Mode)
 	m.advancedCursor = 0
+	// Separate the profile's options into wizard-known advanced flags and
+	// free-form expert arguments so each wizard step can display them correctly.
 	known := optionSet(wizardAdvancedOptions())
 	m.expertOptions = nil
 	for _, opt := range profile.Options {
@@ -1108,14 +1110,17 @@ func (m Model) renderWizardStepper() string {
 		m.translator.T("wizard.review.title"),
 	}
 	if m.editingProfileID != "" {
+		// In edit mode we skip wizardChooseStorage (stage 0), so labels[i] maps to
+		// stage value i+1. The compact chip shows stage value directly as display step.
 		labels = labels[1:]
-		currentStep := int(m.wizardStage)
+		displayStep := int(m.wizardStage) // wizardName=1..wizardReview=7, matching total of 7
 		total := len(labels)
 		if m.width < 76 {
-			return m.design.chip(fmt.Sprintf("%d / %d", currentStep, total), true)
+			return m.design.chip(fmt.Sprintf("%d / %d", displayStep, total), true)
 		}
 		steps := make([]string, 0, len(labels))
 		for index, label := range labels {
+			// stageIndex aligns with the wizardStage enum value (1=Name, 2=Source, …, 7=Review)
 			stageIndex := index + 1
 			mark := "○"
 			style := m.design.Subtitle
