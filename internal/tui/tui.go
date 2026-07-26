@@ -126,6 +126,8 @@ type Model struct {
 	dashboard        dashboardLoadedMsg
 	hoverKind        string
 	hoverIndex       int
+	profileDeleteConfirm bool
+	editingProfileID     string
 }
 
 // New returns an initialized terminal user-interface model.
@@ -453,9 +455,44 @@ func (m *Model) startWizard() {
 	m.expertOptions = nil
 	m.dryRun = true
 	m.confirm = 0
+	m.editingProfileID = ""
 	m.input.Reset()
 	m.input.Blur()
 	m.screen = screenWizard
+}
+
+func (m *Model) startWizardEdit(profile domain.Profile) {
+	m.draft = profile
+	m.editingProfileID = profile.ID
+	m.saveProfile = true
+	m.wizardStage = wizardName
+	m.profileChoice = 1
+	m.wizardName = profile.Name
+	m.modeCursor = modeIndex(profile.Mode)
+	m.advancedCursor = 0
+	known := optionSet(wizardAdvancedOptions())
+	m.expertOptions = nil
+	for _, opt := range profile.Options {
+		if !known[opt] {
+			m.expertOptions = append(m.expertOptions, opt)
+		}
+	}
+	m.dryRun = profile.DryRunByDefault
+	m.confirm = 0
+	m.status = ""
+	m.input.Reset()
+	m.screen = screenWizard
+	m.loadWizardInput()
+}
+
+func modeIndex(mode domain.Mode) int {
+	modes := wizardModes(true)
+	for i, m := range modes {
+		if m == mode {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
@@ -569,6 +606,25 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 		} else {
 			m.draft.SourceSemantics = domain.CopyContents
 		}
+	case "w":
+		if m.editingProfileID != "" {
+			if err := m.persistWizardProfile(); err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
+			m.profiles, _ = m.store.ListProfiles()
+			m.cursor = 0
+			for i, p := range m.profiles {
+				if p.ID == m.editingProfileID {
+					m.cursor = i
+					break
+				}
+			}
+			m.editingProfileID = ""
+			m.screen = screenProfiles
+			m.status = ""
+			return m, nil
+		}
 	case "enter":
 		if m.draft.Destructive() && !m.dryRun && m.confirm < 1 {
 			m.confirm++
@@ -579,6 +635,7 @@ func (m Model) handleWizard(key string) (tea.Model, tea.Cmd) {
 			m.status = err.Error()
 			return m, nil
 		}
+		m.editingProfileID = ""
 		return m.beginRun(m.draft, m.dryRun, !m.saveProfile)
 	}
 	return m, nil
@@ -668,9 +725,30 @@ func (m Model) selectedAdvancedOptions() []string {
 }
 
 func (m Model) handleProfiles(key string) (tea.Model, tea.Cmd) {
+	if m.profileDeleteConfirm {
+		switch key {
+		case "d", "enter":
+			profile := m.profiles[m.cursor]
+			if err := m.store.DeleteProfile(profile.ID); err != nil {
+				m.status = m.translator.T("profiles.delete_error", err)
+			} else {
+				m.status = m.translator.T("profiles.deleted")
+				m.profiles, _ = m.store.ListProfiles()
+				if m.cursor >= len(m.profiles) {
+					m.cursor = max(0, len(m.profiles)-1)
+				}
+			}
+			m.profileDeleteConfirm = false
+		default:
+			m.profileDeleteConfirm = false
+			m.status = ""
+		}
+		return m, nil
+	}
 	if key == "esc" || key == "q" {
 		m.screen = screenHome
 		m.cursor = 0
+		m.status = ""
 		return m, nil
 	}
 	if len(m.profiles) == 0 {
@@ -681,6 +759,13 @@ func (m Model) handleProfiles(key string) (tea.Model, tea.Cmd) {
 		m.cursor = (m.cursor - 1 + len(m.profiles)) % len(m.profiles)
 	case "down", "j":
 		m.cursor = (m.cursor + 1) % len(m.profiles)
+	case "d":
+		m.profileDeleteConfirm = true
+		m.status = ""
+	case "e":
+		profile := m.profiles[m.cursor]
+		m.startWizardEdit(profile)
+		return m, m.input.Focus()
 	case "enter":
 		profile := m.profiles[m.cursor]
 		return m.beginRun(profile, profile.DryRunByDefault, false)
@@ -988,6 +1073,9 @@ func (m Model) renderWizard() string {
 	content := m.design.CardHigh.Render(summary) + "\n\n" +
 		m.design.Card.Render(m.design.CardTitle.Render(m.translator.T("history.command"))+"\n"+commandText) + "\n\n" +
 		m.design.Shortcut.Render(m.translator.T("wizard.review.help", action))
+	if m.editingProfileID != "" {
+		content += "\n" + m.design.Shortcut.Render(m.translator.T("wizard.review.save_help", m.translator.T("wizard.action.save_only")))
+	}
 	if confirm != "" {
 		content += "\n\n" + m.design.dialog(
 			m.translator.T("wizard.warning.destructive"),
@@ -1009,9 +1097,6 @@ func (m Model) renderWizardFrame(title, content string) string {
 }
 
 func (m Model) renderWizardStepper() string {
-	if m.width < 76 {
-		return m.design.chip(fmt.Sprintf("%d / 8", int(m.wizardStage)+1), true)
-	}
 	labels := []string{
 		m.translator.T("wizard.storage.title"),
 		m.translator.T("wizard.name.title"),
@@ -1021,6 +1106,33 @@ func (m Model) renderWizardStepper() string {
 		m.translator.T("wizard.advanced.title"),
 		m.translator.T("wizard.expert.title"),
 		m.translator.T("wizard.review.title"),
+	}
+	if m.editingProfileID != "" {
+		labels = labels[1:]
+		currentStep := int(m.wizardStage)
+		total := len(labels)
+		if m.width < 76 {
+			return m.design.chip(fmt.Sprintf("%d / %d", currentStep, total), true)
+		}
+		steps := make([]string, 0, len(labels))
+		for index, label := range labels {
+			stageIndex := index + 1
+			mark := "○"
+			style := m.design.Subtitle
+			if stageIndex < int(m.wizardStage) {
+				mark = m.design.Icons.Success
+				style = m.design.Success
+			}
+			if stageIndex == int(m.wizardStage) {
+				mark = "●"
+				style = m.design.Title
+			}
+			steps = append(steps, style.Render(mark+" "+truncateDisplay(label, 12)))
+		}
+		return strings.Join(steps, "  ")
+	}
+	if m.width < 76 {
+		return m.design.chip(fmt.Sprintf("%d / 8", int(m.wizardStage)+1), true)
 	}
 	steps := make([]string, 0, len(labels))
 	for index, label := range labels {
@@ -1054,9 +1166,16 @@ func (m Model) renderProfiles() string {
 			profile.Destination.Address(false))
 		cards = append(cards, m.design.card(title, body, 0, index == m.cursor, m.isHovered("profile", index), false))
 	}
+	footer := ""
+	if m.profileDeleteConfirm && m.cursor < len(m.profiles) {
+		footer = m.design.Warning.Render(m.translator.T("profiles.delete.confirm", m.profiles[m.cursor].Name)) + "\n\n"
+	} else if m.status != "" {
+		footer = m.renderStatus(m.status) + "\n\n"
+	}
 	return m.design.Headline.Render(m.design.Icons.Profiles+"  "+m.translator.T("menu.profiles")) + "\n" +
 		m.design.Subtitle.Render(m.translator.T("profiles.subtitle")) + "\n\n" +
 		strings.Join(cards, "\n\n") + "\n\n" +
+		footer +
 		m.design.Shortcut.Render(m.translator.T("profiles.help"))
 }
 
