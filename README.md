@@ -182,7 +182,7 @@ keep seven daily, four weekly and twelve monthly snapshots.
 
 ## Building and testing
 
-Go 1.25 or newer is required:
+Go 1.26 or newer is required:
 
 ```bash
 go test ./...
