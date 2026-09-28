@@ -5,7 +5,7 @@ Hinweise für Claude Code in diesem Repository.
 ## Projekt
 
 `rsync-tui` ist eine zweisprachige (Englisch/Deutsch) Terminal-Oberfläche für
-sichere lokale und SSH-Übertragungen mit `rsync`, geschrieben in Go 1.25 mit
+sichere lokale und SSH-Übertragungen mit `rsync`, geschrieben in Go 1.26 mit
 Bubble Tea v2, Bubbles v2 und Lip Gloss v2 (`charm.land/...`). Zielplattform ist
 Linux (amd64, arm64, armv7) als statisches Binary; rsync und OpenSSH werden
 zur Laufzeit vorausgesetzt, nicht mitgeliefert.
@@ -24,7 +24,7 @@ go test -tags=ssh_integration ./internal/browser   # braucht SSH_TEST_HOST=user@
 ```
 
 Die CI (`.github/workflows/ci.yml`) prüft gofmt, vet, Tests mit Race-Detector
-auf Go 1.25.x und 1.26.x, den Self-Test, shellcheck, Cross-Builds
+auf Go 1.26.x und 1.27.x, den Self-Test, shellcheck, Cross-Builds
 (amd64/arm64/armv7, `CGO_ENABLED=0`), SSH-Integration und govulncheck.
 
 ## Aufbau

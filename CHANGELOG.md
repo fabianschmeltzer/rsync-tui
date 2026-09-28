@@ -5,6 +5,13 @@ Semantic Versioning.
 
 ## [Unreleased][]
 
+### Changed
+
+- Go 1.26 or newer is now required to build from source (Bubble Tea 2.0.10
+  requires it); release binaries are unaffected
+- Updated Bubble Tea to 2.0.10, Bubbles to 2.2.1, Lip Gloss to 2.0.6 and
+  charmbracelet/x/ansi to 0.11.8
+
 ## [0.1.3][] - 2026-07-05
 
 ### Added
