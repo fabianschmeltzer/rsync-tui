@@ -380,12 +380,12 @@ func (t *Translator) Toggle() {
 func ValidateCatalogs() error {
 	for key := range catalogs["en"] {
 		if _, ok := catalogs["de"][key]; !ok {
-			return fmt.Errorf("German catalog is missing %q", key)
+			return fmt.Errorf("german catalog is missing %q", key)
 		}
 	}
 	for key := range catalogs["de"] {
 		if _, ok := catalogs["en"][key]; !ok {
-			return fmt.Errorf("English catalog is missing %q", key)
+			return fmt.Errorf("english catalog is missing %q", key)
 		}
 	}
 	return nil

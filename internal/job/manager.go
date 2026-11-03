@@ -55,24 +55,39 @@ func New(store *config.Store) Manager {
 	}
 }
 
-// Execute runs a profile and records its outcome.
+// Execute runs a profile and records its outcome. Notifications are sent once,
+// after the outcome is final, so that a failure in a later stage (for example
+// snapshot verification or retention) is reported as a failure. Scheduled runs
+// also report failures that occur before rsync starts, because nobody is
+// watching them.
 func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Options) (Outcome, error) {
+	started := time.Now()
+	outcome, attempted, err := m.execute(ctx, profile, options)
+	if attempted || (options.Scheduled && err != nil) {
+		m.sendNotifications(profile, options, &outcome, err, started)
+	}
+	return outcome, err
+}
+
+// execute performs the job. The boolean reports whether rsync (or its
+// mandatory preview) was started, in which case the outcome holds its result.
+func (m Manager) execute(ctx context.Context, profile domain.Profile, options Options) (Outcome, bool, error) {
 	var outcome Outcome
 	if endpoint, remote := sshclient.RemoteEndpoint(profile); remote {
 		if err := sshclient.BatchCheck(ctx, endpoint, options.SSHControlPath); err != nil {
-			return outcome, err
+			return outcome, false, err
 		}
 		if err := sshclient.CheckRsync(ctx, endpoint, options.SSHControlPath); err != nil {
-			return outcome, err
+			return outcome, false, err
 		}
 		if profile.Source.IsRemote() {
 			if err := browser.ValidateRemotePath(ctx, profile.Source, options.SSHControlPath, false); err != nil {
-				return outcome, err
+				return outcome, false, err
 			}
 		}
 		if profile.Destination.IsRemote() {
 			if err := browser.ValidateRemotePath(ctx, profile.Destination, options.SSHControlPath, true); err != nil {
-				return outcome, err
+				return outcome, false, err
 			}
 		}
 	}
@@ -109,7 +124,7 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 			}
 		}
 		if err != nil {
-			return outcome, err
+			return outcome, false, err
 		}
 		build.DestinationOverride = prepared.PartialPath
 		build.LinkDestination = prepared.LinkDestination
@@ -118,12 +133,12 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 	var manifest string
 	if options.Scheduled && profile.Mode == domain.ModeMove {
 		if profile.Source.IsRemote() {
-			return outcome, errors.New("scheduled remote Move requires an interactive review")
+			return outcome, false, errors.New("scheduled remote Move requires an interactive review")
 		}
 		var err error
 		manifest, err = freezeLocalSource(m.Store.Paths.StateDir, profile)
 		if err != nil {
-			return outcome, err
+			return outcome, false, err
 		}
 		defer os.Remove(manifest)
 		build.FrozenFileList = manifest
@@ -140,14 +155,13 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 		outcome.Preview = &preview
 		if err != nil {
 			outcome.Result = preview
-			m.sendNotifications(profile, options, &outcome)
-			return outcome, fmt.Errorf("mandatory destructive preview failed: %w", err)
+			return outcome, true, fmt.Errorf("mandatory destructive preview failed: %w", err)
 		}
 		if profile.Mode == domain.ModeMirror && deleteCount.Load() > int64(profile.Safety.MaxDelete) {
-			return outcome, fmt.Errorf("preview contains %d deletions, above max_delete %d", deleteCount.Load(), profile.Safety.MaxDelete)
+			return outcome, true, fmt.Errorf("preview contains %d deletions, above max_delete %d", deleteCount.Load(), profile.Safety.MaxDelete)
 		}
 		if profile.Mode == domain.ModeMove && changeCount.Load() > int64(profile.Safety.MaxSourceRemovals) {
-			return outcome, fmt.Errorf("preview contains %d source removals, above max_source_removals %d", changeCount.Load(), profile.Safety.MaxSourceRemovals)
+			return outcome, true, fmt.Errorf("preview contains %d source removals, above max_source_removals %d", changeCount.Load(), profile.Safety.MaxSourceRemovals)
 		}
 		deleteCount.Store(0)
 		changeCount.Store(0)
@@ -189,8 +203,7 @@ func (m Manager) Execute(ctx context.Context, profile domain.Profile, options Op
 			}
 		}
 	}
-	m.sendNotifications(profile, options, &outcome)
-	return outcome, runErr
+	return outcome, true, runErr
 }
 
 func (m Manager) verifySnapshot(ctx context.Context, profile domain.Profile, options Options, snapshotPath string) error {
@@ -225,24 +238,42 @@ func (m Manager) verifySnapshot(ctx context.Context, profile domain.Profile, opt
 	return nil
 }
 
-func (m Manager) sendNotifications(profile domain.Profile, options Options, outcome *Outcome) {
-	status := "success"
-	if outcome.Result.ExitCode != 0 {
-		status = "failure"
+func (m Manager) sendNotifications(profile domain.Profile, options Options, outcome *Outcome, runErr error, started time.Time) {
+	event := notificationEvent(profile, options, *outcome, runErr, started, time.Now())
+	outcome.NotificationWarnings = m.Notifications.Send(context.Background(), profile.Notifications, event)
+}
+
+// notificationEvent derives the notification from the final outcome. A run
+// counts as failed when rsync exited non-zero or when any later stage returned
+// an error, even if rsync itself succeeded.
+func notificationEvent(profile domain.Profile, options Options, outcome Outcome, runErr error, started, finished time.Time) notify.Event {
+	result := outcome.Result
+	if result.StartedAt.IsZero() {
+		result.StartedAt = started
 	}
-	event := notify.Event{
+	if result.FinishedAt.IsZero() {
+		result.FinishedAt = finished
+	}
+	status := "success"
+	message := result.Error
+	if result.ExitCode != 0 || runErr != nil {
+		status = "failure"
+		if message == "" && runErr != nil {
+			message = runErr.Error()
+		}
+	}
+	return notify.Event{
 		Event:           "transfer.completed",
 		Status:          status,
 		ProfileID:       profile.ID,
 		ProfileName:     profile.Name,
-		StartedAt:       outcome.Result.StartedAt,
-		FinishedAt:      outcome.Result.FinishedAt,
-		DurationSeconds: outcome.Result.FinishedAt.Sub(outcome.Result.StartedAt).Seconds(),
-		ExitCode:        outcome.Result.ExitCode,
-		Message:         outcome.Result.Error,
+		StartedAt:       result.StartedAt,
+		FinishedAt:      result.FinishedAt,
+		DurationSeconds: result.FinishedAt.Sub(result.StartedAt).Seconds(),
+		ExitCode:        result.ExitCode,
+		Message:         message,
 		Version:         options.Version,
 	}
-	outcome.NotificationWarnings = m.Notifications.Send(context.Background(), profile.Notifications, event)
 }
 
 func isChangedLine(line string) bool {
