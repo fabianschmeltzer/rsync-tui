@@ -115,7 +115,18 @@ case ":$PATH:" in
         ;;
 esac
 
-if [ "$NO_SYSTEMD" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+install_update_timer() {
+    # The update timer is optional. Without a systemd user session (for
+    # example root over a plain `su` or a minimal container, where
+    # XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS are unset), `systemctl
+    # --user` fails; that must not abort an otherwise finished installation.
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        echo "Note: no systemd user session available; skipping the automatic update timer." >&2
+        echo "      Re-run with XDG_RUNTIME_DIR=/run/user/\$(id -u) set to enable it," >&2
+        echo "      or pass NO_SYSTEMD=1 to silence this note." >&2
+        return 0
+    fi
+
     UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$UNIT_DIR"
     cat > "$UNIT_DIR/rsync-tui-update.service" <<EOF
@@ -140,8 +151,14 @@ RandomizedDelaySec=30m
 [Install]
 WantedBy=timers.target
 EOF
-    systemctl --user daemon-reload
-    systemctl --user enable --now rsync-tui-update.timer >/dev/null
+    if ! { systemctl --user daemon-reload &&
+        systemctl --user enable --now rsync-tui-update.timer >/dev/null; }; then
+        echo "Warning: could not enable rsync-tui-update.timer; rsync-tui itself is installed." >&2
+    fi
+}
+
+if [ "$NO_SYSTEMD" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    install_update_timer
 fi
 
 echo "Installed: $INSTALL_DIR/rsync-tui"

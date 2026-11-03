@@ -12,6 +12,12 @@ Semantic Versioning.
 - Updated Bubble Tea to 2.0.10, Bubbles to 2.2.1, Lip Gloss to 2.0.6 and
   charmbracelet/x/ansi to 0.11.8
 
+### Fixed
+
+- The installer no longer aborts after installing the binary when no systemd user
+  session is available (for example as root without `XDG_RUNTIME_DIR`); the
+  optional update timer is skipped with a note instead
+
 ## [0.1.3][] - 2026-07-05
 
 ### Added
