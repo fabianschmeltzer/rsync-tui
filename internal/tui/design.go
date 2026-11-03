@@ -394,7 +394,7 @@ func (d designSystem) segmentedControl(labels []string, active, hovered, width i
 }
 
 func (d designSystem) dialog(title, body string, width int, danger bool) string {
-	style := d.CardHigh.Copy().Border(lipgloss.DoubleBorder())
+	style := d.CardHigh.Border(lipgloss.DoubleBorder())
 	titleStyle := d.Title
 	icon := d.Icons.Info
 	if danger {
@@ -429,16 +429,16 @@ func (d designSystem) card(title, body string, width int, selected, hovered, pri
 	}
 	if hovered {
 		if primary {
-			style = style.Copy().Border(lipgloss.RoundedBorder())
+			style = style.Border(lipgloss.RoundedBorder())
 		} else {
-			style = d.CardHigh.Copy().Border(lipgloss.RoundedBorder())
+			style = d.CardHigh.Border(lipgloss.RoundedBorder())
 		}
 		if !d.NoColor {
 			style = style.BorderForeground(lipgloss.Color(d.Roles.Outline))
 		}
 	}
 	if selected {
-		style = style.Copy().Border(lipgloss.DoubleBorder())
+		style = style.Border(lipgloss.DoubleBorder())
 		if !d.NoColor {
 			style = style.BorderForeground(lipgloss.Color(d.Roles.Primary))
 		}

@@ -861,11 +861,6 @@ func (m Model) render() string {
 	return m.renderApplication()
 }
 
-func (m Model) renderHome() string {
-	width := max(34, m.width-8)
-	return m.renderDashboard(width, responsiveLayout(m.width))
-}
-
 func (m Model) renderSettings() string {
 	values := []string{
 		m.languageSettingLabel(),
@@ -892,7 +887,7 @@ func (m Model) renderSettings() string {
 }
 
 func (m Model) renderAppearanceSegments() string {
-	options := []string{m.settings.Theme}
+	var options []string
 	current := m.settings.Theme
 	prefix := "settings.theme."
 	switch m.settingsCursor {

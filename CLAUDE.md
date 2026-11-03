@@ -16,7 +16,8 @@ zur Laufzeit vorausgesetzt, nicht mitgeliefert.
 gofmt -w cmd internal                 # formatieren (CI bricht bei Abweichungen ab)
 go vet ./...
 go test ./...                         # CI nutzt zusätzlich -race
-go test ./internal/rsync -run TestName
+go test ./internal/rsync -run TestName   # einzelner Test (Paket + Name)
+go test ./... -run TestName              # Name über alle Pakete
 go run ./cmd/rsync-tui self-test      # läuft auch in CI
 go run ./cmd/rsync-tui                # TUI starten
 shellcheck install.sh
@@ -38,7 +39,9 @@ auf Go 1.26.x und 1.27.x, den Self-Test, shellcheck, Cross-Builds
 - `internal/rsync`: Bau der rsync-Argumente (`command.go`), Preflight-Prüfungen,
   Ausführung mit Fortschritts-Events (`runner.go`) und Verlauf.
 - `internal/job`: orchestriert einen Lauf (Preflight, rsync, Snapshot,
-  Benachrichtigungen).
+  Benachrichtigungen). `job.Manager.Execute` ist der gemeinsame Einstieg für
+  TUI (`tui.go`), `run`/`schedule` und Restore in `main.go`; Verhaltensänderungen
+  am Ablauf gehören hierher, nicht in die Aufrufer.
 - `internal/snapshot`: `--link-dest`-Snapshots mit Last-N- oder GFS-Aufbewahrung.
 - `internal/config`: XDG-konforme TOML-Profile, Einstellungen und Zustand.
 - `internal/tui`: Bubble-Tea-Modell (`tui.go`), Designsystem und Themes
